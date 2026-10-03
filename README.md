@@ -1,5 +1,7 @@
 # dotfiles
 
+![Demo: Start menu and search, calculator, Quick settings, light/dark mode, volume pop-up, calendar and weather](docs/demo.gif)
+
 Arch Linux + Sway (Wayland). Colors are generated from the wallpaper with [wallust](https://codeberg.org/explosion-mental/wallust).
 The previous bspwm/X11 setup lives in [litework/dotfiles-archive](https://github.com/litework/dotfiles-archive).
 
