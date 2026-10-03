@@ -15,6 +15,7 @@ The previous bspwm/X11 setup lives in [litework/dotfiles-archive](https://github
 | Colors       | `wallust`                                 | `pywal`                  |
 | Files        | `yazi`                                    | `ranger`                 |
 | Music        | `mpd` + `ncmpcpp`                         | —                        |
+| Network      | NetworkManager + `wifi-menu` (fuzzel, click the bar) | dhcpcd + wpa_supplicant |
 | Audio        | PipeWire (`wireplumber`, `wpctl`)          | PulseAudio               |
 | Screenshots  | `grim` + `slurp`                          | `scrot`                  |
 

@@ -1,0 +1,74 @@
+#!/bin/sh
+# wifi-menu — pick a Wi-Fi network with fuzzel (NetworkManager). Bound to the waybar network module.
+set -u
+
+notify() { notify-send -a wifi-menu -i network-wireless "Wi-Fi" "$1"; }
+menu() { fuzzel --dmenu --index --prompt "$1" --lines "${2:-10}" --width 44; }
+
+if [ "$(nmcli radio wifi)" = "disabled" ]; then
+    choice=$(printf '󰖩  Turn Wi-Fi on\n' | menu "wifi> " 1) || exit 0
+    nmcli radio wifi on && notify "Wi-Fi on"
+    exit 0
+fi
+
+# IN-USE:SIGNAL:SECURITY:SSID — SSID last so colons inside it survive the split.
+list=$(nmcli --terse --escape no --fields IN-USE,SIGNAL,SECURITY,SSID device wifi list --rescan auto |
+    sort -t: -k1,1r -k2,2nr |
+    awk -F: '{ ssid = substr($0, length($1 $2 $3) + 4) }
+             ssid != "" && !seen[ssid]++ { print $1 "\t" $2 "\t" $3 "\t" ssid }')
+
+entries=$(printf '%s\n' "$list" | awk -F'\t' '{
+    s = $2 + 0
+    icon = s >= 75 ? "󰤨" : s >= 50 ? "󰤥" : s >= 25 ? "󰤢" : "󰤟"
+    lock = ($3 == "" || $3 == "--") ? "  " : " "
+    mark = $1 == "*" ? "  (connected)" : ""
+    printf "%s %s %s%s\n", icon, lock, $4, mark
+}')
+
+idx=$(printf '%s\n󰖪  Turn Wi-Fi off\n  Edit connections…\n' "$entries" | menu "wifi> ") || exit 0
+case "$idx" in ""|-*|*[!0-9]*) exit 0 ;; esac
+count=$(printf '%s\n' "$list" | grep -c .)
+
+if [ "$idx" -eq "$count" ]; then
+    nmcli radio wifi off && notify "Wi-Fi off"; exit 0
+elif [ "$idx" -eq $((count + 1)) ]; then
+    exec nm-connection-editor
+fi
+
+line=$(printf '%s\n' "$list" | sed -n "$((idx + 1))p")
+inuse=$(printf '%s' "$line" | cut -f1)
+security=$(printf '%s' "$line" | cut -f3)
+ssid=$(printf '%s' "$line" | cut -f4-)
+[ -n "$ssid" ] || exit 0
+
+if [ "$inuse" = "*" ]; then
+    notify "Already connected to $ssid"; exit 0
+fi
+
+# Known network: just bring it up.
+if nmcli --terse --fields NAME connection show | grep -Fxq "$ssid"; then
+    if nmcli --wait 30 connection up id "$ssid" >/dev/null 2>&1; then
+        notify "Connected to $ssid"
+    else
+        notify "Could not connect to $ssid"
+    fi
+    exit 0
+fi
+
+# New network: ask for a password if it is secured.
+if [ -n "$security" ] && [ "$security" != "--" ]; then
+    password=$(fuzzel --dmenu --password --prompt "password> " --placeholder "$ssid" --lines 0 --width 44 </dev/null) || exit 0
+    [ -n "$password" ] || exit 0
+    if nmcli --wait 30 device wifi connect "$ssid" password "$password" >/dev/null 2>&1; then
+        notify "Connected to $ssid"
+    else
+        nmcli connection delete id "$ssid" >/dev/null 2>&1
+        notify "Could not connect to $ssid (wrong password?)"
+    fi
+else
+    if nmcli --wait 30 device wifi connect "$ssid" >/dev/null 2>&1; then
+        notify "Connected to $ssid"
+    else
+        notify "Could not connect to $ssid"
+    fi
+fi

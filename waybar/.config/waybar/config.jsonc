@@ -42,10 +42,14 @@
   },
   "backlight": { "format": " {percent}%" },
   "network": {
-    "format-wifi": " {essid}",
+    "format-wifi": "{icon} {essid}",
     "format-ethernet": "󰈀 {ipaddr}",
-    "format-disconnected": "󰖪",
-    "tooltip-format": "{ifname} {ipaddr}/{cidr}"
+    "format-disconnected": "󰖪 offline",
+    "format-disabled": "󰖪 off",
+    "format-icons": ["󰤟", "󰤢", "󰤥", "󰤨"],
+    "tooltip-format-wifi": "{essid} ({signalStrength}%)\n{ipaddr}/{cidr} on {ifname}",
+    "on-click": "~/.local/bin/wifi-menu",
+    "on-click-right": "nm-connection-editor"
   },
   "battery": {
     "states": { "warning": 25, "critical": 10 },
