@@ -1,0 +1,19 @@
+#!/bin/sh
+# nightlight [on|off|toggle|status] — warm screen colours after sunset (wlsunset).
+# Location is Toronto at city precision, from the system timezone.
+set -u
+
+running() { pgrep -x wlsunset >/dev/null; }
+start() { running || setsid -f wlsunset -l 43.7 -L -79.4 -t 4000 -T 6500 >/dev/null 2>&1; }
+stop() { pkill -x wlsunset; }
+refresh_bar() { pkill -RTMIN+9 -x waybar 2>/dev/null; }
+
+case "${1:-toggle}" in
+    on) start ;;
+    off) stop ;;
+    toggle) if running; then stop; else start; fi ;;
+    status) if running; then echo on; else echo off; fi; exit 0 ;;
+    *) echo "usage: nightlight [on|off|toggle|status]" >&2; exit 1 ;;
+esac
+sleep 0.2
+refresh_bar

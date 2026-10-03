@@ -5,7 +5,7 @@
   "spacing": 4,
   "modules-left": ["custom/power", "sway/workspaces", "sway/mode", "mpd"],
   "modules-center": ["clock"],
-  "modules-right": ["cpu", "memory", "wireplumber", "custom/brightness", "battery", "custom/mouse", "tray", "network", "bluetooth"],
+  "modules-right": ["cpu", "memory", "wireplumber", "custom/brightness", "custom/night", "battery", "custom/mouse", "tray", "network", "bluetooth"],
 
   "custom/power": {
     "format": "⏻",
@@ -49,6 +49,14 @@
     "interval": 60,
     "tooltip": false,
     "on-click": "piper"
+  },
+  "custom/night": {
+    "exec": "~/.local/bin/nightlight status",
+    "format": "NIGHT {}",
+    "interval": 300,
+    "signal": 9,
+    "tooltip": false,
+    "on-click": "~/.local/bin/nightlight toggle"
   },
   "custom/brightness": {
     "exec": "brightnessctl -m -c backlight | cut -d, -f4",

@@ -33,6 +33,12 @@ Font: [PragmataPro](https://fsd.it/shop/fonts/pragmatapro/) (commercial, not in 
 Each top-level directory is a [GNU Stow](https://www.gnu.org/software/stow/) package mirroring `$HOME`.
 `install.sh` installs packages, backs up conflicting files to `~/.dotfiles-backup/`, and links everything with `stow --no-folding`.
 
+## Maintenance
+
+- `wallust` comes from crates.io (the AUR package's checksum is broken); update it with `cargo install --locked wallust`.
+- Neovim plugins are pinned in `nvim/.config/nvim/nvim-pack-lock.json`; update with `:lua vim.pack.update()` and commit the lockfile.
+- `paccache.timer` trims the package cache and `reflector.timer` refreshes mirrors weekly; TLP handles power saving.
+
 ## Keys
 
 `Super` is the modifier. Bindings follow the old sxhkd layout.
@@ -51,4 +57,5 @@ Each top-level directory is a [GNU Stow](https://www.gnu.org/software/stow/) pac
 | `Super+F2…F10` | yazi, thunar, edge, ncmpcpp, spotify, weechat, gimp, pavucontrol, qbittorrent |
 | `Print` / `Shift+Print` | screenshot area / full screen |
 | `Super+x` / `Super+Shift+Esc` | power menu / lock |
+| `Super+v` | clipboard history |
 | `Super+Esc` / `Super+Alt+Esc` | reload / exit sway |
