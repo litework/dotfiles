@@ -5,7 +5,7 @@
   "position": "bottom",
   "height": 32,
   "spacing": 2,
-  "modules-left": ["sway/workspaces", "sway/mode", "custom/weather"],
+  "modules-left": ["custom/weather", "sway/workspaces", "sway/mode"],
   "modules-center": ["custom/start", "wlr/taskbar"],
   "modules-right": ["tray", "group/status", "clock"],
 
