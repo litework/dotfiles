@@ -52,8 +52,9 @@ input type:touchpad {
 }
 
 ### Idle / lock
+# Never locks on a timer (lock manually with Super+Shift+Esc). The screen just turns
+# off after 15 minutes idle and wakes on input; closing the lid locks before sleep.
 exec swayidle -w \
-    timeout 600  '~/.local/bin/lock' \
     timeout 900  'swaymsg "output * power off"' \
           resume 'swaymsg "output * power on"' \
     before-sleep '~/.local/bin/lock'
