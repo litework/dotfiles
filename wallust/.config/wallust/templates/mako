@@ -1,0 +1,8 @@
+include=~/.config/mako/config
+background-color={{background}}
+text-color={{foreground}}
+border-color={{color7}}
+progress-color=over {{color8}}
+
+[urgency=high]
+border-color={{color1}}

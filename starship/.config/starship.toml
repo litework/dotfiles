@@ -1,0 +1,39 @@
+# ~/.config/starship.toml — replaces powerlevel9k (status, dir, vcs | jobs, time)
+add_newline = false
+format = "$status$directory$git_branch$git_status$character"
+right_format = "$sudo$jobs$cmd_duration$time"
+
+[status]
+disabled = false
+format = "[$symbol]($style) "
+symbol = "✘"
+success_symbol = ""
+style = "red"
+
+[directory]
+style = "blue"
+truncation_length = 3
+
+[git_branch]
+format = "[$branch]($style) "
+style = "green"
+
+[git_status]
+style = "yellow"
+
+[character]
+success_symbol = "[❯](white)"
+error_symbol = "[❯](red)"
+vimcmd_symbol = "[❮](green)"
+
+[time]
+disabled = false
+format = "[$time]($style)"
+style = "bright-black"
+
+[cmd_duration]
+format = "[$duration]($style) "
+style = "bright-black"
+
+[jobs]
+format = "[$symbol$number]($style) "

@@ -1,0 +1,28 @@
+#!/bin/sh
+# wallpaper [image] — set the wallpaper. With an image, regenerate the wallust palette
+# and reload everything; without one, restore the last wallpaper (used at sway startup).
+set -eu
+
+state="${XDG_STATE_HOME:-$HOME/.local/state}/wallpaper"
+wallust="$(command -v wallust || echo "$HOME/.cargo/bin/wallust")"
+
+if [ $# -gt 0 ]; then
+    img="$(realpath "$1")"
+    mkdir -p "$(dirname "$state")"
+    ln -sfn "$img" "$state"
+    "$wallust" run -q "$img"
+    changed=1
+else
+    img="$(readlink "$state" 2>/dev/null)" || { echo "usage: wallpaper <image>" >&2; exit 1; }
+    changed=0
+    [ -f "$HOME/.cache/wallust/colors-sway" ] || { "$wallust" run -q "$img"; changed=1; }
+fi
+
+pkill -x swaybg || true
+setsid -f swaybg -i "$img" -m fill >/dev/null 2>&1
+
+if [ "$changed" = 1 ] && [ -n "${SWAYSOCK:-}" ]; then
+    swaymsg -q reload
+    makoctl reload 2>/dev/null || true
+    pkill -USR2 -x waybar || true
+fi

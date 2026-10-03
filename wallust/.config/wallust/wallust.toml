@@ -1,0 +1,15 @@
+# wallust: palette from wallpaper -> templates below. Run via `wallpaper <image>`.
+backend = "resized"
+color_space = "lch"
+palette = "dark16"
+check_contrast = true
+
+[templates]
+sway     = { template = "colors-sway",      target = "~/.cache/wallust/colors-sway" }
+waybar   = { template = "colors-waybar.css", target = "~/.config/waybar/colors.css" }
+foot     = { template = "colors-foot.ini",  target = "~/.cache/wallust/colors-foot.ini" }
+fuzzel   = { template = "colors-fuzzel.ini", target = "~/.cache/wallust/colors-fuzzel.ini" }
+mako     = { template = "mako",             target = "~/.cache/wallust/mako" }
+swaylock = { template = "swaylock",         target = "~/.cache/wallust/swaylock" }
+nvim     = { template = "colors-nvim.lua",  target = "~/.cache/wallust/colors-nvim.lua" }
+sequences = { template = "sequences",        target = "~/.cache/wallust/sequences" }

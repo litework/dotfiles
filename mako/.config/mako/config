@@ -1,0 +1,10 @@
+# ~/.config/mako/config — colors come from ~/.cache/wallust/mako, which includes this file.
+font=JetBrainsMono Nerd Font 10
+width=320
+padding=10
+margin=11
+border-size=1
+border-radius=0
+default-timeout=6000
+max-visible=4
+anchor=top-right

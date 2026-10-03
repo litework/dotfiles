@@ -1,0 +1,57 @@
+// ~/.config/waybar/config.jsonc — replaces polybar (same module layout)
+{
+  "position": "bottom",
+  "height": 22,
+  "spacing": 4,
+  "modules-left": ["custom/power", "sway/workspaces", "sway/mode", "mpd"],
+  "modules-center": ["clock"],
+  "modules-right": ["cpu", "memory", "bluetooth", "wireplumber", "backlight", "network", "battery", "tray"],
+
+  "custom/power": {
+    "format": "⏻",
+    "tooltip": false,
+    "on-click": "~/.local/bin/powermenu"
+  },
+  "sway/workspaces": { "disable-scroll": true },
+  "mpd": {
+    "format": "{stateIcon} {artist} - {title}",
+    "format-stopped": "",
+    "format-disconnected": "",
+    "state-icons": { "playing": "", "paused": "" },
+    "max-length": 40,
+    "on-click": "mpc toggle"
+  },
+  "clock": {
+    "format": "{:%a %d %b  %H:%M}",
+    "tooltip-format": "<tt>{calendar}</tt>"
+  },
+  "cpu": { "format": " {usage}%", "interval": 5 },
+  "memory": { "format": " {percentage}%", "interval": 10 },
+  "bluetooth": {
+    "format": "",
+    "format-connected": " {device_alias}",
+    "format-disabled": "",
+    "on-click": "blueman-manager"
+  },
+  "wireplumber": {
+    "format": "{icon} {volume}%",
+    "format-muted": " muted",
+    "format-icons": ["", "", ""],
+    "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+    "on-click-right": "pavucontrol"
+  },
+  "backlight": { "format": " {percent}%" },
+  "network": {
+    "format-wifi": " {essid}",
+    "format-ethernet": "󰈀 {ipaddr}",
+    "format-disconnected": "󰖪",
+    "tooltip-format": "{ifname} {ipaddr}/{cidr}"
+  },
+  "battery": {
+    "states": { "warning": 25, "critical": 10 },
+    "format": "{icon} {capacity}%",
+    "format-charging": " {capacity}%",
+    "format-icons": ["", "", "", "", ""]
+  },
+  "tray": { "spacing": 6 }
+}

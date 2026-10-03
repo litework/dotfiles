@@ -1,0 +1,19 @@
+daemonize
+show-failed-attempts
+ignore-empty-password
+indicator-caps-lock
+image={{wallpaper}}
+scaling=fill
+font=JetBrainsMono Nerd Font
+color={{background | strip}}
+inside-color={{background | strip}}cc
+ring-color={{color8 | strip}}
+key-hl-color={{color7 | strip}}
+bs-hl-color={{color1 | strip}}
+line-color=00000000
+separator-color=00000000
+text-color={{foreground | strip}}
+inside-ver-color={{color4 | strip}}cc
+ring-ver-color={{color4 | strip}}
+inside-wrong-color={{color1 | strip}}cc
+ring-wrong-color={{color1 | strip}}
