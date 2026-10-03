@@ -49,4 +49,10 @@ window#waybar {
 #status { padding: 0 6px; }
 #custom-network, #custom-volume, #custom-battery { padding: 0 5px; }
 
-#clock { padding: 0 10px; margin-right: 6px; font-size: 11px; }
+#clock {
+  padding: 0 10px;
+  margin-right: 6px;
+  font-family: "Adwaita Sans";
+  font-size: 11px;
+  font-feature-settings: "tnum";
+}
