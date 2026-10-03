@@ -1,19 +1,54 @@
 #!/bin/sh
-# nightlight [on|off|toggle|status] — warm screen colours after sunset (wlsunset).
+# nightlight — warm screen colours with wlsunset; settings persist across logins.
+#   nightlight apply                  (re)start wlsunset from the saved settings
+#   nightlight on|off|toggle          enable / disable
+#   nightlight schedule on|off        follow sunset/sunrise, or stay warm all the time
+#   nightlight strength 0-100         how warm (0 = none, 100 = 2500K)
+#   nightlight stronger|weaker        strength ±5 (bar scroll)
+#   nightlight status                 text for the waybar module
 # Location is Toronto at city precision, from the system timezone.
 set -u
 
-running() { pgrep -x wlsunset >/dev/null; }
-start() { running || setsid -f wlsunset -l 43.7 -L -79.4 -t 4000 -T 6500 >/dev/null 2>&1; }
-stop() { pkill -x wlsunset; }
-refresh_bar() { pkill -RTMIN+9 -x waybar 2>/dev/null; }
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/nightlight"
+state="$dir/state"
+enabled=1 schedule=1 strength=60
+[ -r "$state" ] && . "$state"
+
+save() {
+    mkdir -p "$dir"
+    printf 'enabled=%s\nschedule=%s\nstrength=%s\n' "$enabled" "$schedule" "$strength" >"$state"
+}
+
+apply() {
+    pkill -x wlsunset
+    i=0
+    while pgrep -x wlsunset >/dev/null && [ $i -lt 40 ]; do sleep 0.05; i=$((i + 1)); done
+    [ "$enabled" = 1 ] || return 0
+    temp=$((6500 - strength * 40))
+    if [ "$schedule" = 1 ]; then high=6500; else high=$((temp + 1)); fi  # high≈low: same warmth day and night
+    [ "$high" -gt "$temp" ] || high=$((temp + 1))
+    setsid -f wlsunset -l 43.7 -L -79.4 -t "$temp" -T "$high" >/dev/null 2>&1
+}
+
+clamp() { [ "$1" -lt 0 ] && echo 0 && return; [ "$1" -gt 100 ] && echo 100 && return; echo "$1"; }
 
 case "${1:-toggle}" in
-    on) start ;;
-    off) stop ;;
-    toggle) if running; then stop; else start; fi ;;
-    status) if running; then echo on; else echo off; fi; exit 0 ;;
-    *) echo "usage: nightlight [on|off|toggle|status]" >&2; exit 1 ;;
+    apply) apply; exit 0 ;;
+    on) enabled=1 ;;
+    off) enabled=0 ;;
+    toggle) enabled=$((1 - enabled)) ;;
+    schedule) case "${2:-}" in on) schedule=1 ;; off) schedule=0 ;; *) echo "usage: nightlight schedule on|off" >&2; exit 1 ;; esac ;;
+    strength) strength=$(clamp "${2:?usage: nightlight strength 0-100}") ;;
+    stronger) strength=$(clamp $((strength + 5))); enabled=1 ;;
+    weaker) strength=$(clamp $((strength - 5))) ;;
+    status)
+        if [ "$enabled" != 1 ]; then echo off
+        elif [ "$schedule" = 1 ]; then echo "auto $strength%"
+        else echo "$strength%"; fi
+        exit 0 ;;
+    *) sed -n '2,9s/^# \{0,1\}//p' "$0" >&2; exit 1 ;;
 esac
-sleep 0.2
-refresh_bar
+save
+apply
+pkill -RTMIN+9 -x waybar 2>/dev/null
+exit 0

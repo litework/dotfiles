@@ -1,12 +1,34 @@
 #!/bin/sh
-# mouse-battery — battery of a wireless Logitech (HID++) mouse for waybar.
-# Prints nothing (module hidden) when no such device is connected.
-for dev in /sys/class/power_supply/hidpp_battery_*; do
-    [ -r "$dev/capacity" ] || continue
-    capacity=$(cat "$dev/capacity")
-    case "$(cat "$dev/status" 2>/dev/null)" in
-        Charging) printf '%s%% 󱐋\n' "$capacity" ;;
-        *) printf '%s%%\n' "$capacity" ;;
-    esac
-    exit 0
-done
+# mouse-battery [--watch] — battery of a wireless Logitech (HID++) mouse for waybar.
+# Prints an empty line (module hidden) when no such device is connected.
+# With --watch, reprints on every power_supply udev event (plug/unplug, level
+# change) and once a minute, so the bar updates the moment the receiver goes.
+
+show() {
+    for dev in /sys/class/power_supply/hidpp_battery_*; do
+        [ -r "$dev/capacity" ] || continue
+        capacity=$(cat "$dev/capacity" 2>/dev/null) || continue
+        case "$(cat "$dev/status" 2>/dev/null)" in
+            Charging) echo "$capacity% 󱐋" ;;
+            *) echo "$capacity%" ;;
+        esac
+        return
+    done
+    echo ""
+}
+
+[ "${1:-}" = "--watch" ] || { show; exit 0; }
+
+fifo=$(mktemp -u "${XDG_RUNTIME_DIR:-/tmp}/mouse-battery.XXXXXX")
+mkfifo "$fifo"
+udevadm monitor --udev --subsystem-match=power_supply >"$fifo" &
+monitor=$!
+(while sleep 60; do echo tick; done) >"$fifo" &
+ticker=$!
+trap 'kill $monitor $ticker 2>/dev/null; rm -f "$fifo"; exit 0' INT TERM HUP EXIT
+
+last=x
+while read -r _; do
+    now=$(show)
+    [ "$now" = "$last" ] || { echo "$now"; last=$now; }
+done <"$fifo"

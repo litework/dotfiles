@@ -6,6 +6,7 @@ service (started by sway); `quick-panel wifi|bluetooth` toggles a page
 via the app's D-Bus "toggle" action.
 Network is NetworkManager (nmcli), Bluetooth is BlueZ (bluetoothctl).
 """
+import json
 import os
 import re
 import sys
@@ -97,6 +98,9 @@ class ExpandableList(Gtk.ListBox):
         self.connect("row-activated", self._on_activated)
 
     def _on_activated(self, _box, row):
+        if getattr(row, "qp_on_activate", None):
+            row.qp_on_activate()
+            return
         key = getattr(row, "qp_key", None)
         self.expanded_key = None if self.expanded_key == key else key
         child = self.get_first_child()
@@ -168,6 +172,9 @@ class Page(Gtk.Box):
     title = ""
     settings_label = ""
     settings_cmd = None
+    has_switch = True
+    has_list = True
+    has_refresh = True
 
     def __init__(self, panel):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -190,7 +197,10 @@ class Page(Gtk.Box):
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_height=True,
                                       max_content_height=330)
         scroller.set_child(self.list)
+        scroller.set_visible(self.has_list)
+        self.scroller = scroller
         self.append(scroller)
+        self.switch.set_visible(self.has_switch)
 
         footer = Gtk.Box(spacing=6)
         footer.add_css_class("qp-footer")
@@ -204,7 +214,16 @@ class Page(Gtk.Box):
         self.refresh_button.add_css_class("flat")
         self.refresh_button.connect("clicked", lambda *_: self.rescan())
         footer.append(self.refresh_button)
+        self.refresh_button.set_visible(self.has_refresh)
+        footer.set_visible(bool(self.settings_cmd) or self.has_refresh)
         self.append(footer)
+
+    def add_body(self, *widgets):
+        """Insert widgets between the status line and the list."""
+        anchor = self.status
+        for w in widgets:
+            self.insert_child_after(w, anchor)
+            anchor = w
 
     def set_switch(self, active):
         self.switch.handler_block(self.switch_handler)
@@ -642,6 +661,208 @@ class BluetoothPage(Page):
         run(["bluetoothctl", "power", state], lambda *_: self.refresh())
 
 
+def slider_row(icon, scale, value_label, icon_widget=None):
+    row = Gtk.Box(spacing=10, margin_top=6, margin_bottom=6)
+    row.append(icon_widget or Gtk.Image(icon_name=icon, pixel_size=18))
+    row.append(scale)
+    row.append(value_label)
+    return row
+
+
+class VolumePage(Page):
+    title = "Sound"
+    settings_label = "More sound settings"
+    settings_cmd = ["pavucontrol"]
+    has_switch = False
+    has_refresh = False
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.timer = None
+        self.target = None
+        self.sending = False
+        self.touched = 0.0      # last time the user moved the slider
+        self.muted = False
+
+        self.mute_button = Gtk.Button(icon_name="audio-volume-high-symbolic", tooltip_text="Mute")
+        self.mute_button.add_css_class("flat")
+        self.mute_button.connect("clicked", lambda *_: run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
+                                                            lambda *_: self.refresh()))
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.scale.set_hexpand(True)
+        self.scale.set_draw_value(False)
+        self.scale_handler = self.scale.connect("value-changed", self._on_scale)
+        self.value_label = Gtk.Label(width_chars=4, xalign=1)
+        self.add_body(slider_row(None, self.scale, self.value_label, self.mute_button))
+
+    def opened(self):
+        self.refresh()
+        self.timer = GLib.timeout_add(1000, lambda: (self.refresh(), True)[1])
+
+    def closed(self):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = None
+
+    def _icon(self, vol):
+        if self.muted or vol == 0:
+            return "audio-volume-muted-symbolic"
+        return "audio-volume-low-symbolic" if vol < 34 else \
+               "audio-volume-medium-symbolic" if vol < 67 else "audio-volume-high-symbolic"
+
+    def refresh(self):
+        run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], self._got_volume)
+        run(["pactl", "-f", "json", "list", "sinks"],
+            lambda ok, sinks: run(["pactl", "get-default-sink"],
+                                  lambda ok2, default: self._render_sinks(sinks, default.strip())))
+
+    def _got_volume(self, ok, out):
+        m = re.search(r"Volume: ([\d.]+)( \[MUTED\])?", out)
+        if not m:
+            return
+        vol, self.muted = round(float(m.group(1)) * 100), bool(m.group(2))
+        if time.monotonic() - self.touched > 1.5:   # don't fight a drag in progress
+            self.scale.handler_block(self.scale_handler)
+            self.scale.set_value(vol)
+            self.scale.handler_unblock(self.scale_handler)
+            self.value_label.set_label(f"{vol}%")
+        self.mute_button.set_icon_name(self._icon(int(self.scale.get_value())))
+        self.mute_button.set_tooltip_text("Unmute" if self.muted else "Mute")
+
+    def _on_scale(self, scale):
+        vol = int(scale.get_value())
+        self.touched = time.monotonic()
+        self.value_label.set_label(f"{vol}%")
+        if self.muted:
+            self.muted = False
+            run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"])
+        self.mute_button.set_icon_name(self._icon(vol))
+        self.target = vol
+        if not self.sending:
+            self._send()
+
+    def _send(self):
+        # At most one wpctl in flight; always finish on the latest value.
+        self.sending = True
+        vol = self.target
+        run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", f"{vol}%"], lambda *_: self._sent(vol))
+
+    def _sent(self, vol):
+        self.sending = False
+        if self.target != vol:
+            self._send()
+
+    def _render_sinks(self, out, default):
+        try:
+            sinks = json.loads(out)
+        except ValueError:
+            return
+        current = next((s.get("description", s["name"]) for s in sinks if s["name"] == default), None)
+        self.status.set_label(f"Output: {current}" if current else "No output device")
+        self.list.clear()
+        if len(sinks) < 2:
+            self.scroller.set_visible(False)
+            return
+        self.scroller.set_visible(True)
+        self.section("Output device")
+        for sink in sinks:
+            name = sink["name"]
+            port = (sink.get("active_port") or "").lower()
+            icon = "audio-headphones-symbolic" if "bluez" in name or "headphone" in port else "audio-speakers-symbolic"
+            row = make_row(name, icon, sink.get("description", name), "In use" if name == default else None,
+                           Gtk.Box(), active=name == default)
+            row.qp_on_activate = lambda n=name: run(["pactl", "set-default-sink", n], lambda *_: self.refresh())
+            self.list.append(row)
+
+
+NIGHT_STATE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+                           "nightlight", "state")
+NIGHTLIGHT = os.path.expanduser("~/.local/bin/nightlight")
+
+
+class NightPage(Page):
+    title = "Night light"
+    has_list = False
+    has_refresh = False
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.debounce = None
+
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.scale.set_hexpand(True)
+        self.scale.set_draw_value(False)
+        self.scale_handler = self.scale.connect("value-changed", self._on_scale)
+        self.value_label = Gtk.Label(width_chars=4, xalign=1)
+        strength = Gtk.Label(label="Strength", xalign=0)
+        strength.add_css_class("qp-section")
+
+        schedule = Gtk.Box(spacing=8, margin_top=6)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        labels.append(Gtk.Label(label="Follow the sun", xalign=0))
+        sub = Gtk.Label(label="Fades in at sunset and out at sunrise (Toronto)", xalign=0, wrap=True)
+        sub.add_css_class("qp-sub")
+        labels.append(sub)
+        self.schedule_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.schedule_handler = self.schedule_switch.connect("notify::active", self._on_schedule)
+        schedule.append(labels)
+        schedule.append(self.schedule_switch)
+
+        self.add_body(strength, slider_row("night-light-symbolic", self.scale, self.value_label), schedule)
+
+    def _state(self):
+        state = {"enabled": "1", "schedule": "1", "strength": "60"}
+        try:
+            with open(NIGHT_STATE) as f:
+                for line in f:
+                    k, _, v = line.strip().partition("=")
+                    if k in state:
+                        state[k] = v
+        except OSError:
+            pass
+        return state
+
+    def opened(self):
+        st = self._state()
+        self.set_switch(st["enabled"] == "1")
+        for widget, handler, value in ((self.scale, self.scale_handler, int(st["strength"])),
+                                       (self.schedule_switch, self.schedule_handler, st["schedule"] == "1")):
+            widget.handler_block(handler)
+            widget.set_value(value) if widget is self.scale else widget.set_active(value)
+            widget.handler_unblock(handler)
+        self.value_label.set_label(f"{int(st['strength'])}%")
+        self._status(st)
+
+    def _status(self, st):
+        if st["enabled"] != "1":
+            self.status.set_label("Off")
+        elif st["schedule"] == "1":
+            self.status.set_label("On from sunset to sunrise")
+        else:
+            self.status.set_label("On all the time")
+
+    def _cmd(self, *args):
+        run([NIGHTLIGHT, *args], lambda *_: self._status(self._state()))
+
+    def _on_switch(self, *_):
+        self._cmd("on" if self.switch.get_active() else "off")
+
+    def _on_schedule(self, *_):
+        self._cmd("schedule", "on" if self.schedule_switch.get_active() else "off")
+
+    def _on_scale(self, scale):
+        self.value_label.set_label(f"{int(scale.get_value())}%")
+        # Restarting wlsunset on every tick would flicker; apply once the slider settles.
+        if self.debounce:
+            GLib.source_remove(self.debounce)
+        self.debounce = GLib.timeout_add(250, self._apply_strength)
+
+    def _apply_strength(self):
+        self.debounce = None
+        self._cmd("strength", str(int(self.scale.get_value())))
+        return False
+
+
 AGENT_PATH = "/dev/litework/QuickPanel/agent"
 AGENT_XML = """<node><interface name="org.bluez.Agent1">
   <method name="Release"/>
@@ -787,7 +1008,8 @@ class QuickPanel(Adw.Application):
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         self.stack.add_css_class("qp-panel")
         self.stack.set_size_request(WIDTH - 20, -1)
-        self.pages = {"wifi": WifiPage(self), "bluetooth": BluetoothPage(self)}
+        self.pages = {"wifi": WifiPage(self), "bluetooth": BluetoothPage(self),
+                      "volume": VolumePage(self), "night": NightPage(self)}
         for name, page in self.pages.items():
             self.stack.add_named(page, name)
         self.window.set_child(self.stack)
@@ -806,7 +1028,7 @@ class QuickPanel(Adw.Application):
         elif mode in ("--daemon", None):
             pass
         else:
-            cmdline.printerr("usage: quick-panel-service [wifi|bluetooth|--daemon]\n")
+            cmdline.printerr("usage: quick-panel-service [wifi|bluetooth|volume|night|--daemon]\n")
             return 2
         return 0
 

@@ -62,7 +62,7 @@ exec ~/.local/bin/wallpaper
 exec mako --config ~/.cache/wallust/mako
 exec ~/.local/bin/quick-panel-service --daemon
 exec wl-paste --watch cliphist store
-exec ~/.local/bin/nightlight on
+exec ~/.local/bin/nightlight apply
 exec foot --app-id=scratchpad
 
 ### Bar

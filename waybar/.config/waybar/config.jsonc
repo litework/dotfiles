@@ -39,14 +39,15 @@
   "wireplumber": {
     "format": "VOL {volume}%",
     "format-muted": "VOL muted",
+    "scroll-step": 5,
     "tooltip-format": "{node_name}",
-    "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+    "on-click": "~/.local/bin/quick-panel volume",
+    "on-click-middle": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
     "on-click-right": "pavucontrol"
   },
   "custom/mouse": {
-    "exec": "~/.local/bin/mouse-battery",
+    "exec": "~/.local/bin/mouse-battery --watch",
     "format": "MOUSE {}",
-    "interval": 60,
     "tooltip": false,
     "on-click": "piper"
   },
@@ -56,7 +57,10 @@
     "interval": 300,
     "signal": 9,
     "tooltip": false,
-    "on-click": "~/.local/bin/nightlight toggle"
+    "on-click": "~/.local/bin/quick-panel night",
+    "on-click-middle": "~/.local/bin/nightlight toggle",
+    "on-scroll-up": "~/.local/bin/nightlight stronger",
+    "on-scroll-down": "~/.local/bin/nightlight weaker"
   },
   "custom/brightness": {
     "exec": "brightnessctl -m -c backlight | cut -d, -f4",
