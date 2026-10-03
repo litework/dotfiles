@@ -45,6 +45,7 @@ window.qp-window, window.qp-backdrop { background: none; box-shadow: none; }
 }
 .qp-backdrop { background: transparent; }
 .qp-title { font-weight: bold; font-size: 1.15em; }
+.qp-clock { font-size: 2.2em; font-weight: 300; font-feature-settings: "tnum"; }
 .qp-status { opacity: 0.7; font-size: 0.9em; }
 .qp-section { opacity: 0.6; font-size: 0.85em; font-weight: bold; margin-top: 6px; }
 .qp-list { background: transparent; }
@@ -1459,20 +1460,35 @@ class SettingsPage(Page):
 
 
 class CalendarPage(Page):
+    """Clock with seconds over a calendar. The clock ticks only while this page is open."""
     has_switch = False
     has_list = False
     has_refresh = False
 
     def __init__(self, panel):
         super().__init__(panel)
-        self.calendar = Gtk.Calendar()
+        self.timer = None
+        self.title_label.add_css_class("qp-clock")
+        self.calendar = Gtk.Calendar(margin_top=4)
         self.add_body(self.calendar)
 
     def opened(self):
         now = GLib.DateTime.new_now_local()
-        self.title_label.set_label(now.format("%A"))
-        self.status.set_label(now.format("%B %-d, %Y"))
         (self.calendar.set_date if hasattr(self.calendar, "set_date") else self.calendar.select_day)(now)
+        self._tick()
+
+    def closed(self):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = None
+
+    def _tick(self):
+        now = GLib.DateTime.new_now_local()
+        self.title_label.set_label(now.format("%H:%M:%S"))
+        self.status.set_label(now.format("%A, %B %-d, %Y"))
+        # Wake at the start of the next second so the display never drifts.
+        self.timer = GLib.timeout_add(1000 - now.get_microsecond() // 1000 + 2, self._tick)
+        return False
 
 
 AGENT_PATH = "/dev/litework/QuickPanel/agent"

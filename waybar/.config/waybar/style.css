@@ -39,7 +39,7 @@ window#waybar {
 #workspaces button.urgent { color: @color1; }
 #mode { color: @color0; background: @color7; padding: 0 8px; margin: 3px 2px; border-radius: 6px; }
 
-#custom-start { padding: 0 10px; }
+#custom-start { font-family: "Symbols Nerd Font"; font-size: 17px; padding: 0 12px; color: @foreground; }
 
 #taskbar button { padding: 0 8px; border-bottom: 2px solid transparent; }
 #taskbar button.active { background: alpha(@foreground, 0.10); border-bottom: 2px solid @color4; }

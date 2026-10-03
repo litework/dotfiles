@@ -1,13 +1,8 @@
 /* papirus.css — Papirus panel icons for the taskbar, as CSS backgrounds.
    Generated from /usr/share/icons/Papirus-Dark/24x24/panel; classes come from bar-icon. */
-#custom-start, #custom-network, #custom-volume, #custom-battery {
+#custom-network, #custom-volume, #custom-battery {
   background-repeat: no-repeat;
   background-position: center;
-}
-#custom-start {
-  min-width: 20px;
-  background-size: 20px 20px;
-  background-image: url("/usr/share/icons/Papirus/32x32/apps/start-here-archlinux.svg");
 }
 #custom-network, #custom-volume, #custom-battery {
   min-width: 16px;
