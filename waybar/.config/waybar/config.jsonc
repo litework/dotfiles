@@ -28,10 +28,14 @@
   "cpu": { "format": " {usage}%", "interval": 5 },
   "memory": { "format": " {percentage}%", "interval": 10 },
   "bluetooth": {
-    "format": "",
-    "format-connected": " {device_alias}",
-    "format-disabled": "",
-    "on-click": "blueman-manager"
+    "format": "󰂯",
+    "format-connected": "󰂱 {device_alias}",
+    "format-disabled": "󰂲",
+    "format-off": "󰂲",
+    "tooltip-format-connected": "{device_enumerate}",
+    "tooltip-format-enumerate-connected": "{device_alias}",
+    "on-click": "~/.local/bin/quick-panel bluetooth",
+    "on-click-right": "blueman-manager"
   },
   "wireplumber": {
     "format": "{icon} {volume}%",
@@ -48,7 +52,7 @@
     "format-disabled": "󰖪 off",
     "format-icons": ["󰤟", "󰤢", "󰤥", "󰤨"],
     "tooltip-format-wifi": "{essid} ({signalStrength}%)\n{ipaddr}/{cidr} on {ifname}",
-    "on-click": "~/.local/bin/wifi-menu",
+    "on-click": "~/.local/bin/quick-panel wifi",
     "on-click-right": "nm-connection-editor"
   },
   "battery": {

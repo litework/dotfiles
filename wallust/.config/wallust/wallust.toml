@@ -12,4 +12,5 @@ fuzzel   = { template = "colors-fuzzel.ini", target = "~/.cache/wallust/colors-f
 mako     = { template = "mako",             target = "~/.cache/wallust/mako" }
 swaylock = { template = "swaylock",         target = "~/.cache/wallust/swaylock" }
 nvim     = { template = "colors-nvim.lua",  target = "~/.cache/wallust/colors-nvim.lua" }
+quickpanel = { template = "colors-quickpanel.css", target = "~/.cache/wallust/colors-quickpanel.css" }
 sequences = { template = "sequences",        target = "~/.cache/wallust/sequences" }

@@ -1,0 +1,676 @@
+#!/usr/bin/env python3
+"""quick-panel-service — Windows-style Wi-Fi and Bluetooth flyouts for waybar.
+
+GTK4 + libadwaita on a layer-shell surface. Runs as a hidden background
+service (started by sway); `quick-panel wifi|bluetooth` toggles a page
+via the app's D-Bus "toggle" action.
+Network is NetworkManager (nmcli), Bluetooth is BlueZ (bluetoothctl).
+"""
+import os
+import re
+import sys
+import time
+
+# gtk4-layer-shell must be loaded before libwayland-client.
+if "libgtk4-layer-shell" not in os.environ.get("LD_PRELOAD", ""):
+    os.environ["LD_PRELOAD"] = "/usr/lib/libgtk4-layer-shell.so"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Gtk4LayerShell", "1.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+
+APP_ID = "dev.litework.QuickPanel"
+WIDTH = 360
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x01|\x02")
+
+CSS = """
+window.qp-window, window.qp-backdrop { background: none; box-shadow: none; }
+.qp-panel {
+  margin: 10px;
+  background: alpha(@window_bg_color, 0.88);
+  border-radius: 12px;
+  border: 1px solid alpha(@window_fg_color, 0.10);
+  box-shadow: 0 6px 18px alpha(black, 0.45);
+  padding: 14px;
+}
+.qp-backdrop { background: transparent; }
+.qp-title { font-weight: bold; font-size: 1.15em; }
+.qp-status { opacity: 0.7; font-size: 0.9em; }
+.qp-section { opacity: 0.6; font-size: 0.85em; font-weight: bold; margin-top: 6px; }
+.qp-list { background: transparent; }
+.qp-list > row { border-radius: 8px; padding: 6px 8px; margin: 1px 0; }
+.qp-list > row:hover { background: alpha(@window_fg_color, 0.07); }
+.qp-list > row.qp-active { background: alpha(@accent_bg_color, 0.22); }
+.qp-sub { opacity: 0.65; font-size: 0.85em; }
+.qp-error { color: @error_color; font-size: 0.85em; }
+.qp-footer { margin-top: 8px; }
+"""
+
+
+def run(args, callback=None, stdin=None):
+    """Run a command asynchronously; callback(ok, stdout) on completion."""
+    flags = Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE
+    if stdin is not None:
+        flags |= Gio.SubprocessFlags.STDIN_PIPE
+    try:
+        proc = Gio.Subprocess.new(args, flags)
+    except GLib.Error as e:
+        if callback:
+            callback(False, str(e))
+        return None
+
+    def done(p, res):
+        try:
+            _, out, _ = p.communicate_utf8_finish(res)
+        except GLib.Error as e:
+            out, ok = str(e), False
+        else:
+            ok = p.get_successful()
+        if callback:
+            callback(ok, ANSI.sub("", out or ""))
+
+    proc.communicate_utf8_async(stdin, None, done)
+    return proc
+
+
+def spawn(args):
+    try:
+        Gio.Subprocess.new(args, Gio.SubprocessFlags.NONE)
+    except GLib.Error:
+        pass
+
+
+class ExpandableList(Gtk.ListBox):
+    """ListBox where activating a row toggles a revealer with actions."""
+
+    def __init__(self):
+        super().__init__(selection_mode=Gtk.SelectionMode.NONE)
+        self.add_css_class("qp-list")
+        self.expanded_key = None
+        self.connect("row-activated", self._on_activated)
+
+    def _on_activated(self, _box, row):
+        key = getattr(row, "qp_key", None)
+        self.expanded_key = None if self.expanded_key == key else key
+        child = self.get_first_child()
+        while child:
+            if hasattr(child, "qp_revealer"):
+                child.qp_revealer.set_reveal_child(child.qp_key == self.expanded_key)
+            child = child.get_next_sibling()
+        if self.expanded_key is not None and getattr(row, "qp_focus", None):
+            GLib.idle_add(row.qp_focus.grab_focus)
+
+    def clear(self):
+        while (child := self.get_first_child()) is not None:
+            self.remove(child)
+
+
+def make_row(key, icon, title, subtitle, actions, active=False, trailing_icon=None, focus=None):
+    row = Gtk.ListBoxRow(activatable=True)
+    row.qp_key = key
+    row.qp_focus = focus
+    if active:
+        row.add_css_class("qp-active")
+
+    outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    line = Gtk.Box(spacing=12)
+    line.append(Gtk.Image(icon_name=icon, pixel_size=20))
+    labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
+    t = Gtk.Label(label=title, xalign=0, ellipsize=3)
+    labels.append(t)
+    if subtitle:
+        s = Gtk.Label(label=subtitle, xalign=0, ellipsize=3)
+        s.add_css_class("qp-sub")
+        labels.append(s)
+    line.append(labels)
+    if trailing_icon:
+        line.append(Gtk.Image(icon_name=trailing_icon, pixel_size=14, opacity=0.6))
+    outer.append(line)
+
+    revealer = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+    revealer.set_child(actions)
+    outer.append(revealer)
+    row.qp_revealer = revealer
+    row.set_child(outer)
+    return row
+
+
+def action_box(*widgets):
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=8)
+    for w in widgets:
+        box.append(w)
+    return box
+
+
+def button_row(*buttons):
+    box = Gtk.Box(spacing=6, halign=Gtk.Align.END)
+    for b in buttons:
+        box.append(b)
+    return box
+
+
+def button(label, callback, suggested=False):
+    b = Gtk.Button(label=label)
+    if suggested:
+        b.add_css_class("suggested-action")
+    b.connect("clicked", lambda *_: callback())
+    return b
+
+
+class Page(Gtk.Box):
+    title = ""
+
+    def __init__(self, panel):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.panel = panel
+
+        header = Gtk.Box(spacing=8)
+        self.title_label = Gtk.Label(label=self.title, xalign=0, hexpand=True)
+        self.title_label.add_css_class("qp-title")
+        self.switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.switch_handler = self.switch.connect("notify::active", self._on_switch)
+        header.append(self.title_label)
+        header.append(self.switch)
+        self.append(header)
+
+        self.status = Gtk.Label(xalign=0)
+        self.status.add_css_class("qp-status")
+        self.append(self.status)
+
+        self.list = ExpandableList()
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_height=True,
+                                      max_content_height=330)
+        scroller.set_child(self.list)
+        self.append(scroller)
+
+        footer = Gtk.Box(spacing=6)
+        footer.add_css_class("qp-footer")
+        self.settings_button = Gtk.Button(label=self.settings_label, hexpand=True, halign=Gtk.Align.START)
+        self.settings_button.add_css_class("flat")
+        self.settings_button.connect("clicked", lambda *_: (self.panel.hide_panel(), spawn(self.settings_cmd)))
+        self.refresh_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Refresh")
+        self.refresh_button.add_css_class("flat")
+        self.refresh_button.connect("clicked", lambda *_: self.rescan())
+        footer.append(self.settings_button)
+        footer.append(self.refresh_button)
+        self.append(footer)
+
+    def set_switch(self, active):
+        self.switch.handler_block(self.switch_handler)
+        self.switch.set_active(active)
+        self.switch.handler_unblock(self.switch_handler)
+
+    def section(self, text):
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        label = Gtk.Label(label=text, xalign=0)
+        label.add_css_class("qp-section")
+        row.set_child(label)
+        self.list.append(row)
+
+    def placeholder(self, text):
+        row = Gtk.ListBoxRow(activatable=False)
+        label = Gtk.Label(label=text, xalign=0, margin_top=6, margin_bottom=6)
+        label.add_css_class("qp-sub")
+        row.set_child(label)
+        self.list.append(row)
+
+    # Overridden by pages
+    def _on_switch(self, *_):
+        pass
+
+    def opened(self):
+        pass
+
+    def closed(self):
+        pass
+
+    def rescan(self):
+        pass
+
+
+class WifiPage(Page):
+    title = "Wi-Fi"
+    settings_label = "More Wi-Fi settings"
+    settings_cmd = ["nm-connection-editor"]
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.device = None
+        self.busy = None        # SSID currently connecting
+        self.error = {}         # SSID -> message
+        self.timer = None
+
+    def opened(self):
+        self.list.expanded_key = None
+        run(["nmcli", "-t", "-f", "DEVICE,TYPE", "device"], self._got_device)
+        self.refresh(rescan=True)
+        self.timer = GLib.timeout_add_seconds(8, lambda: (self.refresh(), True)[1])
+
+    def closed(self):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = None
+        self.error.clear()
+
+    def _got_device(self, ok, out):
+        for line in out.splitlines():
+            dev, _, typ = line.partition(":")
+            if typ == "wifi":
+                self.device = dev
+                return
+
+    def rescan(self):
+        self.refresh(rescan=True)
+
+    def refresh(self, rescan=False):
+        def got_radio(ok, out):
+            on = out.strip() == "enabled"
+            self.set_switch(on)
+            if not on:
+                self.status.set_label("Wi-Fi is off")
+                self.list.clear()
+                return
+            run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], got_known)
+
+        def got_known(ok, out):
+            known = {l.rsplit(":", 1)[0].replace("\\:", ":") for l in out.splitlines()
+                     if l.endswith(":802-11-wireless")}
+            run(["nmcli", "--terse", "--escape", "no", "--fields", "IN-USE,SIGNAL,SECURITY,SSID",
+                 "device", "wifi", "list", "--rescan", "yes" if rescan else "no"],
+                lambda ok, out: self._render(out, known))
+
+        run(["nmcli", "radio", "wifi"], got_radio)
+
+    def _render(self, out, known):
+        nets = {}
+        for line in out.splitlines():
+            parts = line.split(":", 3)
+            if len(parts) < 4 or not parts[3]:
+                continue
+            inuse, signal, security, ssid = parts[0] == "*", int(parts[1] or 0), parts[2], parts[3]
+            prev = nets.get(ssid)
+            if prev is None or inuse or (not prev["inuse"] and signal > prev["signal"]):
+                nets[ssid] = {"inuse": inuse or (prev or {}).get("inuse", False), "signal": signal,
+                              "secure": security not in ("", "--"), "known": ssid in known}
+
+        ordered = sorted(nets.items(), key=lambda kv: (not kv[1]["inuse"], -kv[1]["signal"]))
+        connected = next((s for s, n in ordered if n["inuse"]), None)
+        self.status.set_label(f"Connected to {connected}" if connected else "Not connected")
+
+        expanded = self.list.expanded_key
+        self.list.clear()
+        if not ordered:
+            self.placeholder("Searching for networks…")
+        for ssid, n in ordered:
+            self.list.append(self._row(ssid, n))
+        self.list.expanded_key = expanded
+        child = self.list.get_first_child()
+        while child:
+            if hasattr(child, "qp_revealer"):
+                child.qp_revealer.set_reveal_child(child.qp_key == expanded)
+            child = child.get_next_sibling()
+
+    def _row(self, ssid, n):
+        s = n["signal"]
+        level = "excellent" if s >= 75 else "good" if s >= 50 else "ok" if s >= 25 else "weak"
+        icon = f"network-wireless-signal-{level}-symbolic"
+        if self.busy == ssid:
+            sub = "Connecting…"
+        elif n["inuse"]:
+            sub = "Connected, secured" if n["secure"] else "Connected"
+        else:
+            sub = "Secured" if n["secure"] else "Open"
+            if n["known"]:
+                sub += " · Saved"
+
+        widgets, focus = [], None
+        if ssid in self.error:
+            err = Gtk.Label(label=self.error[ssid], xalign=0, wrap=True)
+            err.add_css_class("qp-error")
+            widgets.append(err)
+        if n["inuse"]:
+            buttons = [button("Disconnect", self.disconnect)]
+            if n["known"]:
+                buttons.insert(0, button("Forget", lambda: self.forget(ssid)))
+            widgets.append(button_row(*buttons))
+        elif n["secure"] and not n["known"]:
+            entry = Gtk.PasswordEntry(show_peek_icon=True, placeholder_text="Network security key")
+            entry.connect("activate", lambda e: self.connect_to(ssid, e.get_text()))
+            widgets.append(entry)
+            widgets.append(button_row(button("Connect", lambda: self.connect_to(ssid, entry.get_text()), True)))
+            focus = entry
+        else:
+            buttons = [button("Connect", lambda: self.connect_to(ssid), True)]
+            if n["known"]:
+                buttons.insert(0, button("Forget", lambda: self.forget(ssid)))
+            widgets.append(button_row(*buttons))
+
+        lock = "system-lock-screen-symbolic" if n["secure"] else None
+        return make_row(ssid, icon, ssid, sub, action_box(*widgets), active=n["inuse"],
+                        trailing_icon=lock, focus=focus)
+
+    def connect_to(self, ssid, password=None):
+        if password is not None and not password:
+            return
+        self.busy = ssid
+        self.error.pop(ssid, None)
+        self.refresh()
+        args = ["nmcli", "--wait", "30", "device", "wifi", "connect", ssid]
+        if password:
+            args += ["password", password]
+
+        def done(ok, out):
+            self.busy = None
+            if ok:
+                self.list.expanded_key = None
+            else:
+                if password:
+                    # Don't keep a profile with a wrong key.
+                    run(["nmcli", "connection", "delete", "id", ssid])
+                    self.error[ssid] = "Couldn't connect. Check the security key and try again."
+                else:
+                    self.error[ssid] = "Couldn't connect to this network."
+            self.refresh()
+
+        run(args, done)
+
+    def disconnect(self):
+        if self.device:
+            run(["nmcli", "device", "disconnect", self.device], lambda *_: self.refresh())
+
+    def forget(self, ssid):
+        self.list.expanded_key = None
+        run(["nmcli", "connection", "delete", "id", ssid], lambda *_: self.refresh())
+
+    def _on_switch(self, *_):
+        state = "on" if self.switch.get_active() else "off"
+        run(["nmcli", "radio", "wifi", state], lambda *_: GLib.timeout_add(1500, lambda: self.refresh(True)))
+
+
+BT_ICONS = {
+    "audio-headset": "audio-headset-symbolic",
+    "audio-headphones": "audio-headphones-symbolic",
+    "audio-card": "audio-speakers-symbolic",
+    "input-mouse": "input-mouse-symbolic",
+    "input-keyboard": "input-keyboard-symbolic",
+    "input-gaming": "input-gaming-symbolic",
+    "phone": "phone-symbolic",
+    "computer": "computer-symbolic",
+}
+
+
+class BluetoothPage(Page):
+    title = "Bluetooth"
+    settings_label = "More Bluetooth settings"
+    settings_cmd = ["blueman-manager"]
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.busy = {}          # mac -> "Connecting…" etc.
+        self.error = {}
+        self.scan_proc = None
+        self.timer = None
+
+    def opened(self):
+        self.list.expanded_key = None
+        self.refresh()
+        self.timer = GLib.timeout_add_seconds(3, lambda: (self.refresh(), True)[1])
+
+    def closed(self):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = None
+        self.stop_scan()
+        self.error.clear()
+
+    def rescan(self):
+        self.stop_scan()
+        self.start_scan()
+        self.refresh()
+
+    def start_scan(self):
+        if self.scan_proc is None:
+            self.scan_proc = run(["bluetoothctl", "--timeout", "20", "scan", "on"],
+                                 lambda *_: setattr(self, "scan_proc", None))
+
+    def stop_scan(self):
+        if self.scan_proc is not None:
+            self.scan_proc.force_exit()
+            self.scan_proc = None
+            run(["bluetoothctl", "scan", "off"])
+
+    def refresh(self):
+        def got_show(ok, out):
+            powered = "Powered: yes" in out
+            self.set_switch(powered)
+            if not ok or "Controller" not in out:
+                self.status.set_label("No Bluetooth adapter found")
+                self.list.clear()
+                return
+            if not powered:
+                self.status.set_label("Bluetooth is off")
+                self.list.clear()
+                return
+            self.start_scan()
+            # One shell round-trip: all devices, then `info` for each.
+            script = ('bluetoothctl devices; echo "@@"; '
+                      'for m in $(bluetoothctl devices | cut -d" " -f2); do echo "@@ $m"; bluetoothctl info "$m"; done')
+            run(["sh", "-c", script], self._render)
+
+        run(["bluetoothctl", "show"], got_show)
+
+    def _render(self, ok, out):
+        names, infos, current = {}, {}, None
+        head, _, rest = out.partition("@@")
+        for line in head.splitlines():
+            m = re.match(r"Device ([0-9A-F:]{17}) (.+)", line.strip())
+            if m:
+                names[m.group(1)] = m.group(2)
+        for line in rest.splitlines():
+            line = line.strip()
+            if line.startswith("@@ "):
+                current = line[3:]
+                infos[current] = {}
+            elif current and ":" in line:
+                k, _, v = line.partition(":")
+                infos[current][k.strip()] = v.strip()
+
+        devices = []
+        for mac, name in names.items():
+            info = infos.get(mac, {})
+            if not info.get("Name") and re.fullmatch(r"[0-9A-F-]{17}", name):
+                continue  # unnamed devices are noise
+            battery = re.search(r"\((\d+)\)", info.get("Battery Percentage", ""))
+            devices.append({
+                "mac": mac, "name": info.get("Alias", name),
+                "paired": info.get("Paired") == "yes", "connected": info.get("Connected") == "yes",
+                "icon": BT_ICONS.get(info.get("Icon", ""), "bluetooth-active-symbolic"),
+                "battery": battery.group(1) if battery else None,
+            })
+
+        connected = [d["name"] for d in devices if d["connected"]]
+        self.status.set_label("Connected to " + ", ".join(connected) if connected else "Not connected")
+
+        expanded = self.list.expanded_key
+        self.list.clear()
+        paired = sorted((d for d in devices if d["paired"]), key=lambda d: (not d["connected"], d["name"].lower()))
+        found = sorted((d for d in devices if not d["paired"]), key=lambda d: d["name"].lower())
+        if paired:
+            self.section("Your devices")
+            for d in paired:
+                self.list.append(self._row(d))
+        self.section("Add a device")
+        if found:
+            for d in found:
+                self.list.append(self._row(d))
+        else:
+            self.placeholder("Searching… make sure your device is in pairing mode.")
+        self.list.expanded_key = expanded
+        child = self.list.get_first_child()
+        while child:
+            if hasattr(child, "qp_revealer"):
+                child.qp_revealer.set_reveal_child(child.qp_key == expanded)
+            child = child.get_next_sibling()
+
+    def _row(self, d):
+        mac = d["mac"]
+        if mac in self.busy:
+            sub = self.busy[mac]
+        elif d["connected"]:
+            sub = "Connected" + (f" · {d['battery']}% battery" if d["battery"] else "")
+        elif d["paired"]:
+            sub = "Paired"
+        else:
+            sub = "Available"
+
+        widgets = []
+        if mac in self.error:
+            err = Gtk.Label(label=self.error[mac], xalign=0, wrap=True)
+            err.add_css_class("qp-error")
+            widgets.append(err)
+        if d["connected"]:
+            widgets.append(button_row(button("Remove", lambda: self.remove(mac)),
+                                      button("Disconnect", lambda: self.act(mac, ["disconnect"], "Disconnecting…"))))
+        elif d["paired"]:
+            widgets.append(button_row(button("Remove", lambda: self.remove(mac)),
+                                      button("Connect", lambda: self.act(mac, ["connect"], "Connecting…"), True)))
+        else:
+            widgets.append(button_row(button("Pair", lambda: self.pair(mac), True)))
+        return make_row(mac, d["icon"], d["name"], sub, action_box(*widgets), active=d["connected"])
+
+    def act(self, mac, args, label, then=None):
+        self.busy[mac] = label
+        self.error.pop(mac, None)
+        self.refresh()
+
+        def done(ok, out):
+            self.busy.pop(mac, None)
+            if not ok:
+                self.error[mac] = "That didn't work. Make sure the device is on and nearby."
+            elif then:
+                then()
+                return
+            else:
+                self.list.expanded_key = None
+            self.refresh()
+
+        run(["bluetoothctl", "--timeout", "25"] + args + [mac], done)
+
+    def pair(self, mac):
+        self.stop_scan()
+        self.act(mac, ["pair"], "Pairing…",
+                 then=lambda: run(["bluetoothctl", "trust", mac],
+                                  lambda *_: self.act(mac, ["connect"], "Connecting…")))
+
+    def remove(self, mac):
+        self.list.expanded_key = None
+        run(["bluetoothctl", "remove", mac], lambda *_: self.refresh())
+
+    def _on_switch(self, *_):
+        state = "on" if self.switch.get_active() else "off"
+        run(["bluetoothctl", "power", state], lambda *_: self.refresh())
+
+
+class QuickPanel(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.window = None
+        self.backdrop = None
+        self.current = None
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        self.hold()  # stay resident while hidden
+
+        provider = Gtk.CssProvider()
+        provider.load_from_string(CSS)
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        colors = os.path.expanduser("~/.cache/wallust/colors-quickpanel.css")
+        if os.path.exists(colors):
+            p = Gtk.CssProvider()
+            p.load_from_path(colors)
+            Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), p,
+                                                      Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+
+        # Full-screen transparent layer behind the panel: clicking it closes the panel.
+        self.backdrop = Gtk.Window(application=self, decorated=False)
+        self.backdrop.set_css_classes(["qp-backdrop"])
+        LayerShell.init_for_window(self.backdrop)
+        LayerShell.set_namespace(self.backdrop, "quick-panel-backdrop")
+        LayerShell.set_layer(self.backdrop, LayerShell.Layer.TOP)
+        LayerShell.set_exclusive_zone(self.backdrop, -1)
+        for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
+            LayerShell.set_anchor(self.backdrop, edge, True)
+        click = Gtk.GestureClick()
+        click.connect("pressed", lambda *_: self.hide_panel())
+        self.backdrop.add_controller(click)
+
+        self.window = Gtk.Window(application=self, decorated=False, default_width=WIDTH)
+        self.window.set_css_classes(["qp-window"])  # drop the default opaque background
+        LayerShell.init_for_window(self.window)
+        LayerShell.set_namespace(self.window, "quick-panel")
+        LayerShell.set_layer(self.window, LayerShell.Layer.OVERLAY)
+        LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.EXCLUSIVE)
+        LayerShell.set_anchor(self.window, LayerShell.Edge.BOTTOM, True)
+        LayerShell.set_anchor(self.window, LayerShell.Edge.RIGHT, True)
+        
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", lambda _c, kv, *_: (self.hide_panel(), True)[1] if kv == Gdk.KEY_Escape else False)
+        self.window.add_controller(keys)
+
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        self.stack.add_css_class("qp-panel")
+        self.stack.set_size_request(WIDTH - 20, -1)
+        self.pages = {"wifi": WifiPage(self), "bluetooth": BluetoothPage(self)}
+        for name, page in self.pages.items():
+            self.stack.add_named(page, name)
+        self.window.set_child(self.stack)
+
+        toggle = Gio.SimpleAction.new("toggle", GLib.VariantType.new("s"))
+        toggle.connect("activate", lambda _a, mode: self.toggle(mode.get_string()))
+        self.add_action(toggle)
+
+    def do_command_line(self, cmdline):
+        args = cmdline.get_arguments()[1:]
+        mode = args[0] if args else None
+        if mode in self.pages:
+            GLib.idle_add(self.toggle, mode)
+        elif mode in ("--daemon", None):
+            pass
+        else:
+            cmdline.printerr("usage: quick-panel-service [wifi|bluetooth|--daemon]\n")
+            return 2
+        return 0
+
+    def toggle(self, mode):
+        if mode not in self.pages:
+            return
+        if self.window.get_visible() and self.current == mode:
+            self.hide_panel()
+            return
+        if self.current and self.current != mode:
+            self.pages[self.current].closed()
+        self.current = mode
+        self.stack.set_visible_child_name(mode)
+        self.pages[mode].opened()
+        self.backdrop.present()
+        self.window.present()
+
+    def hide_panel(self):
+        if self.current:
+            self.pages[self.current].closed()
+        self.current = None
+        self.window.set_visible(False)
+        self.backdrop.set_visible(False)
+
+
+if __name__ == "__main__":
+    Adw.init()
+    Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.PREFER_DARK)
+    sys.exit(QuickPanel().run(sys.argv))
