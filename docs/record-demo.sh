@@ -15,7 +15,8 @@ restart_panel() {
     env "$@" setsid -f ~/.local/bin/quick-panel-service --daemon >/dev/null 2>&1
     sleep 3
 }
-fetch="fastfetch --structure Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:Display:WM:Theme:Icons:Cursor:Terminal:CPU:GPU:Memory:Disk:Battery:Break:Colors"
+# fastfetch prints once the other windows have tiled, so it lays out at its final width.
+fetch="sh -c 'sleep 2.9; exec fastfetch -c $PWD/fastfetch-demo.jsonc'"
 
 previous=$(swaymsg -t get_workspaces | python -c 'import json,sys; print(next(w["name"] for w in json.load(sys.stdin) if w["focused"]))')
 restart_panel QP_DEMO=1

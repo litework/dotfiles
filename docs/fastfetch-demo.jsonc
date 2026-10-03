@@ -1,0 +1,11 @@
+// fastfetch config for docs/record-demo.sh: small logo and a short GPU name so the
+// output fits a half-width pane without wrapping; no local IP.
+{
+  "logo": { "source": "arch_small" },
+  "modules": [
+    "title", "separator", "os", "host", "kernel", "uptime", "packages", "shell", "display", "wm",
+    "theme", "icons", "cursor", "terminal", "cpu",
+    { "type": "gpu", "format": "Intel HD Graphics 3000" },
+    "memory", "disk", "battery", "break", "colors"
+  ]
+}
