@@ -6,7 +6,10 @@ service (started by sway); `quick-panel wifi|bluetooth` toggles a page
 via the app's D-Bus "toggle" action.
 Network is NetworkManager (nmcli), Bluetooth is BlueZ (bluetoothctl).
 """
+import ast
 import json
+import math
+import operator
 import os
 import pwd
 import re
@@ -26,6 +29,12 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+try:
+    gi.require_version("GioUnix", "2.0")
+    from gi.repository import GioUnix  # noqa: E402
+    DesktopAppInfo = GioUnix.DesktopAppInfo
+except (ValueError, ImportError):
+    DesktopAppInfo = Gio.DesktopAppInfo
 
 # The preload is only for this process; don't leak it into apps we launch.
 os.environ.pop("LD_PRELOAD", None)
@@ -62,9 +71,19 @@ window.qp-window, window.qp-backdrop { background: none; box-shadow: none; }
 .qp-app { padding: 8px 4px; border-radius: 8px; }
 .qp-app-label { font-size: 0.85em; font-weight: normal; }
 .qp-app label { font-weight: normal; }
+.qp-app.qp-selected { background: alpha(@accent_bg_color, 0.30); }
 .qp-heading { font-weight: bold; }
 .qp-user { padding: 4px 8px; border-radius: 8px; }
 .qp-stats { opacity: 0.65; font-size: 0.85em; }
+.qp-osd { background: alpha(@window_bg_color, 0.92); border-radius: 12px; padding: 12px 18px;
+          border: 1px solid alpha(@window_fg_color, 0.10); margin: 10px; box-shadow: 0 4px 12px alpha(black, 0.4); }
+.qp-osd levelbar block.filled { background: @window_fg_color; }
+.qp-osd levelbar block.empty { background: alpha(@window_fg_color, 0.18); }
+.qp-osd levelbar trough { min-height: 4px; }
+.qp-media { background: alpha(@window_fg_color, 0.06); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+.qp-media-title { font-weight: bold; }
+.qp-notif { background: alpha(@window_fg_color, 0.06); border-radius: 8px; padding: 8px 10px; }
+.qp-notif-title { font-weight: bold; }
 .qp-prompt { background: alpha(@accent_bg_color, 0.18); border-radius: 8px; padding: 10px; margin: 4px 0; }
 .qp-prompt-text { font-weight: bold; }
 """
@@ -967,6 +986,146 @@ def read(path, default=""):
         return default
 
 
+class Osd:
+    """Volume/brightness pop-up above the taskbar, like Windows. Hides after 1.5 s."""
+
+    def __init__(self, app):
+        self.win = Gtk.Window(application=app, decorated=False)
+        self.win.set_css_classes(["qp-window"])
+        LayerShell.init_for_window(self.win)
+        LayerShell.set_namespace(self.win, "quick-panel-osd")
+        LayerShell.set_layer(self.win, LayerShell.Layer.OVERLAY)
+        LayerShell.set_keyboard_mode(self.win, LayerShell.KeyboardMode.NONE)
+        LayerShell.set_anchor(self.win, LayerShell.Edge.BOTTOM, True)
+        LayerShell.set_margin(self.win, LayerShell.Edge.BOTTOM, 8)
+        box = Gtk.Box(spacing=14)
+        box.add_css_class("qp-osd")
+        self.icon = Gtk.Image(pixel_size=20)
+        self.bar = Gtk.LevelBar(min_value=0, max_value=100, valign=Gtk.Align.CENTER)
+        self.bar.set_size_request(170, -1)
+        for name in ("low", "high", "full"):
+            self.bar.remove_offset_value(name)
+        self.label = Gtk.Label(width_chars=3, xalign=1)
+        box.append(self.icon)
+        box.append(self.bar)
+        box.append(self.label)
+        self.win.set_child(box)
+        self.hide_id = None
+
+    def show(self, kind):
+        if kind == "volume":
+            def got(ok, out):
+                m = re.search(r"Volume: ([\d.]+)( \[MUTED\])?", out)
+                if m:
+                    vol, muted = round(float(m.group(1)) * 100), bool(m.group(2))
+                    icon = "audio-volume-muted-symbolic" if muted or vol == 0 else \
+                        "audio-volume-low-symbolic" if vol < 34 else \
+                        "audio-volume-medium-symbolic" if vol < 67 else "audio-volume-high-symbolic"
+                    self._present(icon, 0 if muted else vol, "muted" if muted else str(vol))
+            run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], got)
+        elif kind == "brightness":
+            def got(ok, out):
+                m = re.search(r",(\d+)%,", out)
+                if m:
+                    self._present("display-brightness-symbolic", int(m.group(1)), m.group(1))
+            run(["brightnessctl", "-m", "-c", "backlight"], got)
+
+    def _present(self, icon, value, text):
+        self.icon.set_from_icon_name(icon)
+        self.bar.set_value(value)
+        self.label.set_label(text)
+        self.win.present()
+        if self.hide_id:
+            GLib.source_remove(self.hide_id)
+        self.hide_id = GLib.timeout_add(1500, self._hide)
+
+    def _hide(self):
+        self.win.set_visible(False)
+        self.hide_id = None
+        return False
+
+
+PLAYER_NAMES = {"spotify": "Spotify", "msedge": "Edge", "chromium": "Chromium", "mpv": "mpv", "mpd": "Music",
+                "firefox": "Firefox"}
+ART_CACHE = os.path.join(GLib.get_user_cache_dir(), "quick-panel", "art")
+
+
+class MediaCard(Gtk.Box):
+    """Now playing (any MPRIS player via playerctl) with previous / play-pause / next."""
+
+    def __init__(self):
+        super().__init__(spacing=10, visible=False)
+        self.add_css_class("qp-media")
+        self.player = None
+        self.art_url = None
+        self.art = Gtk.Image(pixel_size=48, icon_name="audio-x-generic")
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
+        self.title = Gtk.Label(xalign=0, ellipsize=3, max_width_chars=24)
+        self.title.add_css_class("qp-media-title")
+        self.artist = Gtk.Label(xalign=0, ellipsize=3, max_width_chars=24)
+        self.source = Gtk.Label(xalign=0)
+        self.source.add_css_class("qp-sub")
+        self.source.add_css_class("qp-stats")
+        for w in (self.title, self.artist, self.source):
+            info.append(w)
+        controls = Gtk.Box(spacing=2, valign=Gtk.Align.CENTER)
+        self.play = Gtk.Button(icon_name="media-playback-start-symbolic", tooltip_text="Play/pause")
+        for icon, cmd, tip in (("media-skip-backward-symbolic", "previous", "Previous"), (None, "play-pause", None),
+                               ("media-skip-forward-symbolic", "next", "Next")):
+            b = self.play if icon is None else Gtk.Button(icon_name=icon, tooltip_text=tip)
+            b.add_css_class("flat")
+            b.connect("clicked", lambda _b, c=cmd: self.player and run(["playerctl", "-p", self.player, c],
+                                                                       lambda *_: self.refresh()))
+            controls.append(b)
+        self.append(self.art)
+        self.append(info)
+        self.append(controls)
+
+    def refresh(self):
+        fmt = "{{playerName}}\t{{status}}\t{{title}}\t{{artist}}\t{{mpris:artUrl}}"
+        run(["playerctl", "-a", "metadata", "--format", fmt], self._got)
+
+    def _got(self, ok, out):
+        players = [l.split("\t") for l in out.splitlines() if l.count("\t") == 4]
+        players = [p for p in players if p[2] or p[3]]
+        if not ok or not players:
+            self.set_visible(False)
+            return
+        current = next((p for p in players if p[1] == "Playing"), None) or \
+            next((p for p in players if p[0] == self.player), players[0])
+        name, status, title, artist, art = current
+        self.player = name
+        self.title.set_label(title or "Unknown title")
+        self.artist.set_label(artist)
+        self.artist.set_visible(bool(artist))
+        self.source.set_label(PLAYER_NAMES.get(name.split(".")[0], name.split(".")[0].capitalize()))
+        self.play.set_icon_name("media-playback-pause-symbolic" if status == "Playing"
+                                else "media-playback-start-symbolic")
+        self._set_art(art)
+        self.set_visible(True)
+
+    def _set_art(self, url):
+        if url == self.art_url:
+            return
+        self.art_url = url
+        if url.startswith("file://"):
+            self.art.set_from_file(GLib.filename_from_uri(url)[0])
+        elif url.startswith("http"):
+            os.makedirs(ART_CACHE, exist_ok=True)
+            path = os.path.join(ART_CACHE, GLib.compute_checksum_for_string(GLib.ChecksumType.SHA1, url, -1))
+            if os.path.exists(path):
+                self.art.set_from_file(path)
+            else:
+                self.art.set_from_icon_name("audio-x-generic")
+                run(["curl", "-sfL", "--max-time", "10", "-o", path, url],
+                    lambda ok, _o, u=url, pth=path: ok and self.art_url == u and self.art.set_from_file(pth))
+        else:
+            self.art.set_from_icon_name("audio-x-generic")
+
+
+NOTIF_STATE = os.path.join(GLib.get_user_state_dir(), "quick-panel", "notifications-cleared.json")
+
+
 class Tile(Gtk.Box):
     """Windows-style quick setting: toggle button (+ optional arrow to a detail page) and a label."""
 
@@ -1122,7 +1281,8 @@ class ControlPage(Page):
         footer.append(info)
         footer.append(gear)
 
-        self.add_body(grid, self.brightness, self.volume, Gtk.Separator(margin_top=4), footer)
+        self.media = MediaCard()
+        self.add_body(self.media, grid, self.brightness, self.volume, Gtk.Separator(margin_top=4), footer)
 
     def opened(self):
         self.refresh()
@@ -1159,6 +1319,7 @@ class ControlPage(Page):
 
         self.brightness.refresh()
         self.volume.refresh()
+        self.media.refresh()
 
         bat = "/sys/class/power_supply/BAT0"
         text = f"Battery {read(bat + '/capacity', '?')}%"
@@ -1186,6 +1347,52 @@ class ControlPage(Page):
 PINNED_FILE = os.path.expanduser("~/.config/quick-panel/pinned")
 
 
+_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow,
+        ast.USub: operator.neg, ast.UAdd: operator.pos}
+_FUNCS = {"sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan, "log": math.log10,
+          "ln": math.log, "abs": abs, "round": round}
+_CONSTS = {"pi": math.pi, "e": math.e}
+
+
+def calculate(text):
+    """Evaluate simple arithmetic safely; returns a display string or None if it isn't a sum."""
+    expr = text.strip().lstrip("=").replace("^", "**").replace("×", "*").replace("÷", "/").replace(",", "")
+    if not expr or not any(ch.isdigit() for ch in expr):
+        return None
+    if not text.strip().startswith("=") and not any(op in expr for op in "+-*/%(") :
+        return None
+
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            left, right = ev(node.left), ev(node.right)
+            if isinstance(node.op, ast.Pow) and abs(right) > 1000:
+                raise ValueError("exponent too large")
+            return _OPS[type(node.op)](left, right)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](ev(node.operand))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _FUNCS:
+            return _FUNCS[node.func.id](*[ev(a) for a in node.args])
+        if isinstance(node, ast.Name) and node.id in _CONSTS:
+            return _CONSTS[node.id]
+        raise ValueError("unsupported")
+
+    try:
+        value = ev(ast.parse(expr, mode="eval"))
+    except Exception:
+        return None
+    if isinstance(value, float):
+        if value.is_integer() and abs(value) < 1e15:
+            value = int(value)
+        else:
+            value = float(f"{value:.10g}")
+    return f"{value:,}" if isinstance(value, int) and abs(value) >= 10000 else str(value)
+
+
 class StartPage(Page):
     """Start menu: search, pinned apps, all apps, settings and power."""
     has_header = False
@@ -1199,11 +1406,18 @@ class StartPage(Page):
     def __init__(self, panel):
         super().__init__(panel)
         self.apps = []
-        self.results = []
+        self.items = []         # (button, action) for each selectable search result
+        self.selected = 0
+        self.windows = []
+        self.query = ""
 
-        self.search = Gtk.SearchEntry(placeholder_text="Search for apps", margin_bottom=8)
+        self.search = Gtk.SearchEntry(placeholder_text="Search apps, files, windows, or type a sum",
+                                      margin_bottom=8)
         self.search.connect("search-changed", self._on_search)
-        self.search.connect("activate", lambda *_: self.results and self.launch(self.results[0]))
+        self.search.connect("activate", lambda *_: self._activate_selected())
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_search_key)
+        self.search.add_controller(keys)
 
         self.views = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vhomogeneous=False)
 
@@ -1245,6 +1459,7 @@ class StartPage(Page):
         result_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=286,
                                            max_content_height=286)
         result_scroll.set_child(self.result_list)
+        self.result_scroll = result_scroll
 
         self.views.add_named(pinned, "pinned")
         self.views.add_named(everything, "all")
@@ -1352,7 +1567,7 @@ class StartPage(Page):
 
     def launch(self, app):
         self.panel.hide_panel()
-        if isinstance(app, Gio.DesktopAppInfo) and app.get_boolean("Terminal"):
+        if isinstance(app, DesktopAppInfo) and app.get_boolean("Terminal"):
             cmd = re.sub(r"%[a-zA-Z]", "", app.get_commandline() or "")
             spawn(["foot", *shlex.split(cmd)])
             return
@@ -1364,19 +1579,87 @@ class StartPage(Page):
             spawn(["notify-send", "Couldn't start " + app.get_display_name(), e.message])
 
     # Search ------------------------------------------------------------
+    def _result_row(self, icon, title, subtitle, action):
+        """A selectable search result; icon is a Gio.Icon or an icon name."""
+        b = Gtk.Button()
+        b.add_css_class("flat")
+        b.add_css_class("qp-app")
+        box = Gtk.Box(spacing=12)
+        img = Gtk.Image.new_from_gicon(icon) if isinstance(icon, Gio.Icon) else Gtk.Image(icon_name=icon)
+        img.set_pixel_size(24)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        labels.append(Gtk.Label(label=title, xalign=0, ellipsize=3, max_width_chars=50))
+        if subtitle:
+            sub = Gtk.Label(label=subtitle, xalign=0, ellipsize=1, max_width_chars=60)
+            sub.add_css_class("qp-sub")
+            labels.append(sub)
+        box.append(img)
+        box.append(labels)
+        b.set_child(box)
+        b.connect("clicked", lambda *_: action())
+        self.items.append((b, action))
+        self.result_list.append(b)
+        return b
+
+    def _heading(self, text):
+        label = Gtk.Label(label=text, xalign=0, margin_top=6, margin_start=4)
+        label.add_css_class("qp-section")
+        self.result_list.append(label)
+
+    def _select(self, index):
+        if not self.items:
+            return
+        self.selected = max(0, min(index, len(self.items) - 1))
+        for i, (button, _) in enumerate(self.items):
+            (button.add_css_class if i == self.selected else button.remove_css_class)("qp-selected")
+        # Keep the highlighted row visible.
+        button = self.items[self.selected][0]
+        ok, bounds = button.compute_bounds(self.result_list)
+        if ok:
+            adj = self.result_scroll.get_vadjustment()
+            top, bottom = bounds.get_y(), bounds.get_y() + bounds.get_height()
+            if top < adj.get_value():
+                adj.set_value(top)
+            elif bottom > adj.get_value() + adj.get_page_size():
+                adj.set_value(bottom - adj.get_page_size())
+
+    def _on_search_key(self, _ctrl, keyval, _code, _state):
+        if keyval in (Gdk.KEY_Down, Gdk.KEY_Tab):
+            self._select(self.selected + 1)
+            return True
+        if keyval in (Gdk.KEY_Up, Gdk.KEY_ISO_Left_Tab):
+            self._select(self.selected - 1)
+            return True
+        return False
+
+    def _activate_selected(self):
+        if self.items:
+            self.items[self.selected][1]()
+
     def _on_search(self, entry):
-        q = entry.get_text().strip().lower()
+        raw = entry.get_text().strip()
+        q = raw.lower()
+        self.query = q
+        self.items = []
+        self.selected = 0
         while (child := self.result_list.get_first_child()) is not None:
             self.result_list.remove(child)
         if not q:
-            self.results = []
             self.views.set_visible_child_name("pinned")
             return
+        self.views.set_visible_child_name("search")
+
+        value = calculate(raw)
+        if value is not None:
+            self._heading("Calculator")
+            self._result_row("accessories-calculator", f"= {value}", "Press Enter to copy",
+                             lambda v=value: self._copy(v))
+
         scored = []
         for app in self.apps:
             name = app.get_display_name().lower()
             extra = []
-            if isinstance(app, Gio.DesktopAppInfo):
+            if isinstance(app, DesktopAppInfo):
                 extra = [app.get_generic_name() or "", " ".join(app.get_keywords() or [])]
             hay = " ".join([name, *extra, app.get_executable() or ""]).lower()
             if name.startswith(q):
@@ -1389,17 +1672,110 @@ class StartPage(Page):
                 continue
             scored.append((rank, name, app))
         scored.sort(key=lambda t: t[:2])
-        self.results = [a for _, _, a in scored[:12]]
-        for app in self.results:
-            self.result_list.append(self._app_button(app))
-        if not self.results:
-            none = Gtk.Label(label="No apps found", margin_top=20)
-            none.add_css_class("qp-sub")
-            self.result_list.append(none)
-        self.views.set_visible_child_name("search")
+        if scored:
+            self._heading("Apps")
+            for _, _, app in scored[:8]:
+                self._result_row(app.get_icon() or "application-x-executable", app.get_display_name(),
+                                 app.get_generic_name() if isinstance(app, DesktopAppInfo) else None,
+                                 lambda a=app: self.launch(a))
+
+        wins = [w for w in self.windows if q in w["title"].lower() or q in w["app"].lower()]
+        if wins:
+            self._heading("Open windows")
+            for w in wins[:5]:
+                self._result_row(w["icon"], w["title"], f"Switch to · workspace {w['workspace']}",
+                                 lambda c=w["id"]: (self.panel.hide_panel(), spawn(["swaymsg", f"[con_id={c}] focus"])))
+
+        if len(q) >= 3:
+            run(["fd", "--ignore-case", "--max-depth", "5", "--max-results", "8", "--fixed-strings",
+                 "--absolute-path", "--", raw, os.path.expanduser("~")],
+                lambda ok, out, query=q: self._add_files(query, out))
+
+        if not self.items:
+            self._no_results()
+        self._select(0)
+
+    def _no_results(self):
+        none = Gtk.Label(label="Searching…" if len(self.query) >= 3 else "No results", margin_top=20)
+        none.add_css_class("qp-sub")
+        none.qp_placeholder = True
+        self.result_list.append(none)
+
+    def _add_files(self, query, out):
+        if query != self.query:
+            return   # typed something else since
+        child = self.result_list.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            if getattr(child, "qp_placeholder", False):
+                self.result_list.remove(child)
+            child = nxt
+        paths = [l.rstrip("/") for l in out.splitlines() if l.strip()]
+        if not paths:
+            if not self.items:
+                none = Gtk.Label(label="No results", margin_top=20)
+                none.add_css_class("qp-sub")
+                self.result_list.append(none)
+            return
+        self._heading("Files and folders")
+        home = os.path.expanduser("~")
+        for path in paths:
+            f = Gio.File.new_for_path(path)
+            try:
+                info = f.query_info("standard::icon", Gio.FileQueryInfoFlags.NONE, None)
+                icon = info.get_icon()
+            except GLib.Error:
+                icon = "text-x-generic"
+            parent = os.path.dirname(path).replace(home, "~", 1)
+            self._result_row(icon, os.path.basename(path), parent, lambda u=f.get_uri(): self._open_uri(u))
+        if len(self.items) == len(paths):   # files are the only results
+            self._select(0)
+
+    def _open_uri(self, uri):
+        self.panel.hide_panel()
+        ctx = Gdk.Display.get_default().get_app_launch_context()
+        ctx.unsetenv("LD_PRELOAD")
+        try:
+            Gio.AppInfo.launch_default_for_uri(uri, ctx)
+        except GLib.Error as e:
+            spawn(["notify-send", "Couldn't open file", e.message])
+
+    def _copy(self, value):
+        self.panel.hide_panel()
+        run(["wl-copy", str(value)])
+        spawn(["notify-send", "-a", "Calculator", f"Copied {value}"])
+
+    def _load_windows(self, ok, out):
+        windows = []
+        try:
+            tree = json.loads(out)
+        except ValueError:
+            return
+
+        def walk(node, ws=None):
+            if node.get("type") == "workspace":
+                ws = node.get("name")
+            if node.get("pid") and ws and not ws.startswith("__"):
+                app = node.get("app_id") or (node.get("window_properties") or {}).get("class") or ""
+                info = None
+                for cand in (app, app.lower()):
+                    try:
+                        info = DesktopAppInfo.new(cand + ".desktop")
+                    except TypeError:
+                        info = None
+                    if info:
+                        break
+                windows.append({"id": node["id"], "title": node.get("name") or app, "app": app,
+                                "workspace": ws, "icon": (info and info.get_icon()) or "window-new-symbolic"})
+            for c in node.get("nodes", []) + node.get("floating_nodes", []):
+                walk(c, ws)
+        walk(tree)
+        self.windows = windows
 
     def opened(self):
         self._build()
+        self.windows = []
+        run(["swaymsg", "-t", "get_tree", "-r"], self._load_windows)
         self.search.set_text("")
         self.views.set_visible_child_name("pinned")
         GLib.idle_add(self.search.grab_focus)
@@ -1470,11 +1846,118 @@ class CalendarPage(Page):
         self.timer = None
         self.title_label.add_css_class("qp-clock")
         self.calendar = Gtk.Calendar(margin_top=4)
-        self.add_body(self.calendar)
+
+        head = Gtk.Box(margin_top=8)
+        label = Gtk.Label(label="Notifications", xalign=0, hexpand=True)
+        label.add_css_class("qp-heading")
+        self.clear = Gtk.Button(label="Clear all")
+        self.clear.add_css_class("flat")
+        self.clear.connect("clicked", lambda *_: self._clear_all())
+        head.append(label)
+        head.append(self.clear)
+        self.notes = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        notes_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_height=True,
+                                          max_content_height=220)
+        notes_scroll.set_child(self.notes)
+        self.shown = []
+        self.add_body(head, notes_scroll, Gtk.Separator(margin_top=6), self.calendar)
+
+    # Notifications: mako's history plus anything still on screen. mako has no
+    # "clear history", so cleared ones are remembered by content and hidden.
+    @staticmethod
+    def _key(n):
+        return f"{n.get('app_name')}|{n.get('summary')}|{n.get('body')}"
+
+    def _cleared(self):
+        try:
+            with open(NOTIF_STATE) as f:
+                return set(json.load(f))
+        except (OSError, ValueError):
+            return set()
+
+    def _save_cleared(self, keys):
+        os.makedirs(os.path.dirname(NOTIF_STATE), exist_ok=True)
+        with open(NOTIF_STATE, "w") as f:
+            json.dump(sorted(keys), f)
+
+    def _load_notifications(self):
+        run(["makoctl", "list", "-j"], lambda ok, live: run(["makoctl", "history", "-j"],
+                                                            lambda ok2, hist: self._render_notes(live, hist)))
+
+    def _render_notes(self, live, hist):
+        notes = []
+        for out in (live, hist):
+            try:
+                notes += json.loads(out or "[]")
+            except ValueError:
+                pass
+        cleared = self._cleared()
+        seen, visible = set(), []
+        for n in sorted(notes, key=lambda n: -n.get("id", 0)):
+            k = self._key(n)
+            if k in seen or k in cleared:
+                continue
+            seen.add(k)
+            visible.append(n)
+        # Forget cleared entries mako no longer remembers, so the state file stays small.
+        all_keys = {self._key(n) for n in notes}
+        if cleared - all_keys:
+            self._save_cleared(cleared & all_keys)
+        self.shown = visible
+        while (child := self.notes.get_first_child()) is not None:
+            self.notes.remove(child)
+        self.clear.set_visible(bool(visible))
+        if not visible:
+            none = Gtk.Label(label="No new notifications", xalign=0, margin_top=4, margin_bottom=4)
+            none.add_css_class("qp-sub")
+            self.notes.append(none)
+            return
+        for n in visible[:20]:
+            self.notes.append(self._note_row(n))
+
+    def _note_row(self, n):
+        row = Gtk.Box(spacing=10)
+        row.add_css_class("qp-notif")
+        icon = n.get("app_icon") or ""
+        if icon.startswith("/") and os.path.exists(icon):
+            img = Gtk.Image.new_from_file(icon)
+        else:
+            img = Gtk.Image(icon_name=icon or n.get("desktop_entry") or "dialog-information-symbolic")
+        img.set_pixel_size(28)
+        img.set_valign(Gtk.Align.START)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        app = Gtk.Label(label=n.get("app_name") or "", xalign=0, ellipsize=3)
+        app.add_css_class("qp-stats")
+        title = Gtk.Label(label=n.get("summary") or "", xalign=0, wrap=True, max_width_chars=30)
+        title.add_css_class("qp-notif-title")
+        text.append(app)
+        text.append(title)
+        if n.get("body"):
+            body = Gtk.Label(label=n["body"], xalign=0, wrap=True, max_width_chars=30, lines=3, ellipsize=3)
+            body.add_css_class("qp-sub")
+            text.append(body)
+        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Dismiss", valign=Gtk.Align.START)
+        close.add_css_class("flat")
+        close.connect("clicked", lambda *_: self._dismiss([n]))
+        row.append(img)
+        row.append(text)
+        row.append(close)
+        return row
+
+    def _dismiss(self, notes):
+        self._save_cleared(self._cleared() | {self._key(n) for n in notes})
+        for n in notes:
+            run(["makoctl", "dismiss", "-n", str(n.get("id", 0))])
+        self._load_notifications()
+
+    def _clear_all(self):
+        self._dismiss(self.shown)
+        run(["makoctl", "dismiss", "--all"])
 
     def opened(self):
         now = GLib.DateTime.new_now_local()
         (self.calendar.set_date if hasattr(self.calendar, "set_date") else self.calendar.select_day)(now)
+        self._load_notifications()
         self._tick()
 
     def closed(self):
@@ -1647,6 +2130,17 @@ class QuickPanel(Adw.Application):
         self.window.set_child(self.stack)
 
         self.agent = BluezAgent(self)
+        self.osd = Osd(self)
+
+        osd = Gio.SimpleAction.new("osd", GLib.VariantType.new("s"))
+        osd.connect("activate", lambda _a, kind: self.osd.show(kind.get_string()))
+        self.add_action(osd)
+
+        # Open Start with a query already typed (scripts, testing).
+        start_search = Gio.SimpleAction.new("start-search", GLib.VariantType.new("s"))
+        start_search.connect("activate", lambda _a, q: (self.open_root("start"),
+                                                        self.pages["start"].search.set_text(q.get_string())))
+        self.add_action(start_search)
 
         toggle = Gio.SimpleAction.new("toggle", GLib.VariantType.new("s"))
         toggle.connect("activate", lambda _a, mode: self.toggle(mode.get_string()))

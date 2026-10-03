@@ -8,3 +8,4 @@ border-radius=0
 default-timeout=6000
 max-visible=4
 anchor=top-right
+max-history=50

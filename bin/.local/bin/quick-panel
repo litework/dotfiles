@@ -1,7 +1,14 @@
 #!/bin/sh
-# quick-panel wifi|bluetooth — toggle the flyout. Talks to the resident
-# quick-panel-service over D-Bus (instant); starts the service if needed.
-mode="${1:?usage: quick-panel wifi|bluetooth}"
+# quick-panel PAGE          toggle a flyout (start, control, calendar, wifi, bluetooth, ...)
+# quick-panel osd KIND      show the volume/brightness pop-up
+# quick-panel search TEXT   open Start with TEXT typed in
+# Talks to the resident quick-panel-service over D-Bus (instant); starts it if needed.
+case "${1:?usage: quick-panel PAGE | osd volume|brightness | search TEXT}" in
+    osd) action=osd; arg=${2:?usage: quick-panel osd volume|brightness} ;;
+    search) action=start-search; arg=$2 ;;
+    *) action=toggle; arg=$1 ;;
+esac
+arg=$(printf '%s' "$arg" | sed "s/'/\\\\'/g")
 gdbus call --session --dest dev.litework.QuickPanel --object-path /dev/litework/QuickPanel \
-    --method org.gtk.Actions.Activate toggle "[<'$mode'>]" "{}" >/dev/null 2>&1 ||
-    exec "$HOME/.local/bin/quick-panel-service" "$mode"
+    --method org.gtk.Actions.Activate "$action" "[<'$arg'>]" "{}" >/dev/null 2>&1 && exit 0
+[ "$action" = toggle ] && exec "$HOME/.local/bin/quick-panel-service" "$arg"
