@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")"
 
 PKGS="sway swaybg swayidle swaylock xorg-xwayland xdg-desktop-portal-wlr xdg-desktop-portal-gtk
-waybar fuzzel mako foot ttf-jetbrains-mono-nerd grim slurp wl-clipboard brightnessctl libnotify
+waybar fuzzel mako foot ttf-nerd-fonts-symbols ttf-nerd-fonts-symbols-mono grim slurp wl-clipboard brightnessctl libnotify
 pipewire pipewire-pulse pipewire-alsa wireplumber blueman pavucontrol
 zsh zsh-autosuggestions zsh-syntax-highlighting starship fzf zoxide eza bat ripgrep fd
 neovim tree-sitter-cli yazi mpd mpc ncmpcpp mpv stow rust"

@@ -13,7 +13,7 @@ set $menu fuzzel
 include ~/.cache/wallust/colors-sway
 
 ### Look
-font pango:JetBrainsMono Nerd Font 9
+font pango:Pragmata Pro Mono 10
 default_border pixel 1
 default_floating_border pixel 1
 gaps inner 11

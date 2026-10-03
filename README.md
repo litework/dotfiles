@@ -26,6 +26,8 @@ git clone https://github.com/litework/dotfiles ~/dotfiles
 wallpaper ~/path/to/image.jpg
 ```
 
+Font: [PragmataPro](https://fsd.it/shop/fonts/pragmatapro/) (commercial, not in the repos) — install your own copy, e.g. a locally built `otf-pragmata` package. Icons fall back to `Symbols Nerd Font`.
+
 Each top-level directory is a [GNU Stow](https://www.gnu.org/software/stow/) package mirroring `$HOME`.
 `install.sh` installs packages, backs up conflicting files to `~/.dotfiles-backup/`, and links everything with `stow --no-folding`.
 

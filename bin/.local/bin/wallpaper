@@ -22,7 +22,6 @@ pkill -x swaybg || true
 setsid -f swaybg -i "$img" -m fill >/dev/null 2>&1
 
 if [ "$changed" = 1 ] && [ -n "${SWAYSOCK:-}" ]; then
-    swaymsg -q reload
+    swaymsg -q reload  # also restarts waybar
     makoctl reload 2>/dev/null || true
-    pkill -USR2 -x waybar || true
 fi

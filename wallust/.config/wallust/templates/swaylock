@@ -4,7 +4,7 @@ ignore-empty-password
 indicator-caps-lock
 image={{wallpaper}}
 scaling=fill
-font=JetBrainsMono Nerd Font
+font=Pragmata Pro Mono
 color={{background | strip}}
 inside-color={{background | strip}}cc
 ring-color={{color8 | strip}}
