@@ -37,6 +37,9 @@ exec_always {
     gsettings set org.gnome.desktop.interface monospace-font-name 'Pragmata Pro Mono 11'
 }
 
+### Effects (SwayFX: blur, rounded corners, shadows)
+include ~/.config/sway/fx.conf
+
 ### Input
 input type:keyboard {
     xkb_numlock enabled

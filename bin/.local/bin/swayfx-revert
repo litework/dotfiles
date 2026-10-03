@@ -1,0 +1,14 @@
+#!/bin/sh
+# swayfx-revert — go back from SwayFX to plain sway (works offline from the package cache).
+# Run it from a TTY (Ctrl+Alt+F2) if SwayFX won't start, then log in again.
+set -e
+pkg=$(ls /var/cache/pacman/pkg/sway-1:*-x86_64.pkg.tar.zst 2>/dev/null | sort -V | tail -1)
+if [ -n "$pkg" ]; then
+    sudo pacman -U --ask=4 "$pkg"
+else
+    sudo pacman -S --ask=4 sway
+fi
+# Effects commands are SwayFX-only; turn them off so plain sway starts without errors.
+conf="$HOME/dotfiles/sway/.config/sway/config"
+sed -i 's|^include ~/.config/sway/fx.conf$|# include ~/.config/sway/fx.conf  (SwayFX only)|' "$conf"
+echo "Reverted to sway. Log out and back in."

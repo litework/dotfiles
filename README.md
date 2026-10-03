@@ -5,7 +5,7 @@ The previous bspwm/X11 setup lives in [litework/dotfiles-archive](https://github
 
 | Role         | Program                                   | Replaced                 |
 |--------------|-------------------------------------------|--------------------------|
-| Compositor   | `sway` (+ `swayidle`, `swaylock`, `swaybg`) | `bspwm` + `sxhkd`, `compton` |
+| Compositor   | `swayfx` (sway + blur, rounded corners, shadows; AUR) with `swayidle`, `gtklock`, `swaybg` | `bspwm` + `sxhkd`, `compton` |
 | Taskbar      | `waybar`, Windows 11 layout: workspaces · Start + open windows · tray, status icons, clock | `polybar` / `lemonbar`   |
 | Launcher     | `fuzzel`                                  | `rofi`                   |
 | Notifications| `mako`                                    | —                        |
@@ -36,6 +36,8 @@ Each top-level directory is a [GNU Stow](https://www.gnu.org/software/stow/) pac
 `install.sh` installs packages, backs up conflicting files to `~/.dotfiles-backup/`, and links everything with `stow --no-folding`.
 
 ## Maintenance
+
+- SwayFX comes from the AUR (`yay -S swayfx`). If it misbehaves, `swayfx-revert` reinstalls plain sway from the package cache and disables `fx.conf`.
 
 - `wallust` comes from crates.io (the AUR package's checksum is broken); update it with `cargo install --locked wallust`.
 - Neovim plugins are pinned in `nvim/.config/nvim/nvim-pack-lock.json`; update with `:lua vim.pack.update()` and commit the lockfile.
