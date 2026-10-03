@@ -1503,13 +1503,24 @@ class StartPage(Page):
         self.add_body(self.search, self.views, Gtk.Separator(margin_top=6), bottom)
 
     # Apps --------------------------------------------------------------
+    def _pinned(self):
+        """[(desktop id, short label or None)] from lines like `microsoft-edge.desktop = Edge`."""
+        pins = []
+        for line in read(PINNED_FILE).splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                app_id, _, label = line.partition("=")
+                pins.append((app_id.strip(), label.strip() or None))
+        return pins
+
     def _pinned_ids(self):
-        return [l.strip() for l in read(PINNED_FILE).splitlines() if l.strip() and not l.startswith("#")]
+        return [app_id for app_id, _ in self._pinned()]
 
     def _set_pinned(self, ids):
+        labels = dict(self._pinned())
         os.makedirs(os.path.dirname(PINNED_FILE), exist_ok=True)
         with open(PINNED_FILE, "w") as f:
-            f.write("\n".join(ids) + "\n")
+            f.write("".join(f"{i} = {labels[i]}\n" if labels.get(i) else f"{i}\n" for i in ids))
         self._build()
 
     def _build(self):
@@ -1522,15 +1533,15 @@ class StartPage(Page):
         by_id = {a.get_id(): a for a in self.apps}
 
         self.grid.remove_all()
-        for app_id in self._pinned_ids():
+        for app_id, label in self._pinned():
             if app_id in by_id:
-                self.grid.append(self._app_button(by_id[app_id], tile=True))
+                self.grid.append(self._app_button(by_id[app_id], tile=True, name=label))
         while (child := self.all_list.get_first_child()) is not None:
             self.all_list.remove(child)
         for app in self.apps:
             self.all_list.append(self._app_button(app))
 
-    def _app_button(self, app, tile=False):
+    def _app_button(self, app, tile=False, name=None):
         b = Gtk.Button(tooltip_text=app.get_description() or app.get_display_name())
         b.add_css_class("flat")
         b.add_css_class("qp-app")
@@ -1539,10 +1550,13 @@ class StartPage(Page):
         icon = app.get_icon()
         image = Gtk.Image.new_from_gicon(icon) if icon else Gtk.Image(icon_name="application-x-executable")
         image.set_pixel_size(32 if tile else 24)
-        label = Gtk.Label(label=app.get_display_name(), ellipsize=3, max_width_chars=10 if tile else 50,
-                          xalign=0.5 if tile else 0)
         if tile:
+            # Short name from the pinned file; long names wrap instead of being cut off.
+            label = Gtk.Label(label=name or app.get_display_name(), wrap=True, wrap_mode=2, max_width_chars=11,
+                              justify=Gtk.Justification.CENTER)
             label.add_css_class("qp-app-label")
+        else:
+            label = Gtk.Label(label=app.get_display_name(), ellipsize=3, max_width_chars=50, xalign=0)
         box.append(image)
         box.append(label)
         b.set_child(box)

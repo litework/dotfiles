@@ -1,9 +1,11 @@
-microsoft-edge.desktop
-foot.desktop
-thunar.desktop
-code-oss.desktop
-nvim.desktop
-yazi.desktop
-org.freedesktop.Piper.desktop
-org.pulseaudio.pavucontrol.desktop
-org.qbittorrent.qBittorrent.desktop
+# Start menu pins, in order. Optional short name after "=" (shown under the icon).
+# Right-click any app in Start to pin or unpin it.
+microsoft-edge.desktop = Edge
+foot.desktop = Terminal
+thunar.desktop = Files
+code-oss.desktop = Code
+nvim.desktop = Neovim
+yazi.desktop = Yazi
+org.freedesktop.Piper.desktop = Piper
+org.pulseaudio.pavucontrol.desktop = Volume
+org.qbittorrent.qBittorrent.desktop = qBittorrent
