@@ -55,6 +55,7 @@ The computer now starts straight into the desktop.
 ### 4. First steps
 
 - **`Super`** is the Windows key. **`Super + Space`** opens Start; **`Super + Enter`** opens a terminal.
+- In Start you can just type what you want: an app, a file, a sum like `12*7`, or a command such as **shutdown**, **restart**, **lock**, **wifi** or **dark mode**, then press Enter.
 - Click the **Wi-Fi / volume / battery icons** (bottom right) for Quick settings, the **clock** for the calendar and notifications, and the **weather** (bottom left) for the forecast.
 - **Wallpaper:** Start → ⚙ Settings → Personalization. Everything recolours to match.
 - **Your city** (for weather, night light and light/dark mode): edit `~/.config/location.conf`, for example with `nvim ~/.config/location.conf` (`i` to type, `Esc` then `:wq` to save).

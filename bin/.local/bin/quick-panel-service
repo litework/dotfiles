@@ -1406,6 +1406,39 @@ def calculate(text):
     return f"{value:,}" if isinstance(value, int) and abs(value) >= 10000 else str(value)
 
 
+LOCK_CMD = [os.path.expanduser("~/.local/bin/lock")]
+START_COMMANDS = [
+    ("system-shutdown-symbolic", "Shut down", "Turn the computer off",
+     ["shutdown", "shut down", "power off", "poweroff", "turn off"], "run", ["systemctl", "poweroff"]),
+    ("system-reboot-symbolic", "Restart", "Restart the computer", ["restart", "reboot"], "run", ["systemctl", "reboot"]),
+    ("weather-clear-night-symbolic", "Sleep", "Suspend to RAM", ["sleep", "suspend"], "run", ["systemctl", "suspend"]),
+    ("system-lock-screen-symbolic", "Lock", "Lock the screen", ["lock"], "run", LOCK_CMD),
+    ("system-log-out-symbolic", "Sign out", "Leave the desktop", ["sign out", "log out", "logout", "logoff"],
+     "run", ["swaymsg", "exit"]),
+    ("network-wireless-symbolic", "Wi-Fi", "Settings", ["wifi", "wi-fi", "network", "internet"], "page", "wifi"),
+    ("bluetooth-active-symbolic", "Bluetooth", "Settings", ["bluetooth"], "page", "bluetooth"),
+    ("audio-volume-high-symbolic", "Sound", "Settings", ["sound", "volume", "audio", "speaker"], "page", "volume"),
+    (NIGHT_ICON, "Night light", "Settings", ["night light", "nightlight", "blue light"], "page", "night"),
+    ("preferences-desktop-appearance-symbolic", "Light and dark mode", "Settings",
+     ["dark mode", "light mode", "appearance", "theme"], "page", "appearance"),
+    ("preferences-desktop-wallpaper-symbolic", "Change wallpaper", "Settings",
+     ["wallpaper", "background", "personalization", "personalisation"], "wallpaper", None),
+    ("weather-few-clouds-symbolic", "Weather", "Forecast", ["weather", "forecast"], "page", "weather"),
+    ("edit-paste-symbolic", "Clipboard history", "Settings", ["clipboard", "paste"], "page", "clipboard"),
+    ("emblem-system-symbolic", "Settings", "All settings", ["settings", "control panel"], "page", "settings"),
+]
+
+
+def match_command(query, keywords):
+    """True if the query starts a keyword (≥3 letters typed) or a keyword starts the query ("shutdown now")."""
+    q = " ".join(query.lower().replace("-", " ").split())
+    for k in keywords:
+        k = k.replace("-", " ")
+        if q.startswith(k) or (len(q) >= 3 and k.startswith(q)):
+            return True
+    return False
+
+
 class StartPage(Page):
     """Start menu: search, pinned apps, all apps, settings and power."""
     has_header = False
@@ -1491,7 +1524,7 @@ class StartPage(Page):
                                direction=Gtk.ArrowType.UP)
         power.add_css_class("flat")
         menu = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        lock = [os.path.expanduser("~/.local/bin/lock")]
+        lock = LOCK_CMD
         for label, icon, cmd in (("Lock", "system-lock-screen-symbolic", lock),
                                  ("Sleep", "weather-clear-night-symbolic", ["systemctl", "suspend"]),
                                  ("Sign out", "system-log-out-symbolic", ["swaymsg", "exit"]),
@@ -1676,6 +1709,12 @@ class StartPage(Page):
             return
         self.views.set_visible_child_name("search")
 
+        commands = [c for c in START_COMMANDS if match_command(raw, c[3])]
+        if commands:
+            self._heading("System")
+            for icon, title, sub, _kw, kind, target in commands:
+                self._result_row(icon, title, sub, lambda k=kind, t=target: self._run_command(k, t))
+
         value = calculate(raw)
         if value is not None:
             self._heading("Calculator")
@@ -1721,6 +1760,15 @@ class StartPage(Page):
         if not self.items:
             self._no_results()
         self._select(0)
+
+    def _run_command(self, kind, target):
+        if kind == "run":
+            self.panel.hide_panel()
+            spawn(target)
+        elif kind == "page":
+            self.panel.open_root(target)
+        elif kind == "wallpaper":
+            self.panel.pages["settings"].pick_wallpaper()
 
     def _no_results(self):
         none = Gtk.Label(label="Searching…" if len(self.query) >= 3 else "No results", margin_top=20)
