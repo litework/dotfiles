@@ -17,6 +17,7 @@ window#waybar {
 
 /* Rounded hover highlight on every clickable item, like Windows 11 */
 #workspaces button,
+#custom-weather,
 #custom-start,
 #taskbar button,
 #status,
@@ -26,6 +27,7 @@ window#waybar {
   background-color: transparent;
 }
 #workspaces button:hover,
+#custom-weather:hover,
 #custom-start:hover,
 #taskbar button:hover,
 #status:hover,
@@ -48,6 +50,8 @@ window#waybar {
 
 #status { padding: 0 6px; }
 #custom-network, #custom-volume, #custom-battery { padding: 0 5px; }
+
+#custom-weather { padding-right: 10px; margin-left: 6px; font-family: "Adwaita Sans"; }
 
 #clock {
   padding: 0 10px;

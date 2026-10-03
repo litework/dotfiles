@@ -5,11 +5,18 @@
   "position": "bottom",
   "height": 32,
   "spacing": 2,
-  "modules-left": ["sway/workspaces", "sway/mode"],
+  "modules-left": ["sway/workspaces", "sway/mode", "custom/weather"],
   "modules-center": ["custom/start", "wlr/taskbar"],
   "modules-right": ["tray", "group/status", "clock"],
 
   "sway/workspaces": { "disable-scroll": true },
+
+  "custom/weather": {
+    "exec": "~/.local/bin/weather bar",
+    "return-type": "json",
+    "interval": 900,
+    "on-click": "~/.local/bin/quick-panel weather"
+  },
 
   "custom/start": {
     "format": "\uf303",

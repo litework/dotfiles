@@ -1875,6 +1875,117 @@ class ClipboardPage(Page):
         spawn(["sh", "-c", script, "sh", cid])
 
 
+WEATHER = os.path.expanduser("~/.local/bin/weather")
+
+
+class WeatherPage(Page):
+    """Current conditions, the next hours and a 7-day forecast (Open-Meteo via the weather script)."""
+    title = "Weather"
+    has_switch = False
+    has_list = False
+    has_refresh = False
+    anchor = "left"
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        now = Gtk.Box(spacing=14, margin_top=4)
+        self.now_icon = Gtk.Image(pixel_size=56)
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        self.now_temp = Gtk.Label(xalign=0)
+        self.now_temp.add_css_class("qp-clock")
+        self.now_desc = Gtk.Label(xalign=0)
+        info.append(self.now_temp)
+        info.append(self.now_desc)
+        now.append(self.now_icon)
+        now.append(info)
+        self.details = Gtk.Label(xalign=0, wrap=True, max_width_chars=40)
+        self.details.add_css_class("qp-sub")
+        self.hours = Gtk.Box(spacing=4, homogeneous=True, margin_top=8)
+        days_label = Gtk.Label(label="7-day forecast", xalign=0, margin_top=8)
+        days_label.add_css_class("qp-section")
+        self.days = Gtk.Grid(column_spacing=12, row_spacing=4)
+        self.add_body(now, self.details, Gtk.Separator(margin_top=8), self.hours, Gtk.Separator(margin_top=8),
+                      days_label, self.days)
+
+    def opened(self):
+        run([WEATHER, "json"], self._render)
+
+    @staticmethod
+    def _describe(code, is_day=1):
+        table = {0: ("Clear", "weather-clear", "weather-clear-night"), 1: ("Mostly clear", "weather-few-clouds",
+                 "weather-few-clouds-night"), 2: ("Partly cloudy", "weather-clouds", "weather-clouds-night"),
+                 3: ("Cloudy", "weather-overcast", None), 45: ("Fog", "weather-fog", None),
+                 48: ("Fog", "weather-fog", None)}
+        if code in table:
+            desc, icon, night = table[code]
+        elif code in (51, 53, 61, 80):
+            desc, icon, night = ("Light rain" if code != 80 else "Showers"), "weather-showers-scattered", None
+        elif code in (55, 63, 65, 81, 82):
+            desc, icon, night = "Rain", "weather-showers", None
+        elif code in (56, 57, 66, 67):
+            desc, icon, night = "Freezing rain", "weather-freezing-rain", None
+        elif code in (71, 77, 85):
+            desc, icon, night = "Light snow", "weather-snow-scattered", None
+        elif code in (73, 75, 86):
+            desc, icon, night = "Snow", "weather-snow", None
+        elif code in (95, 96, 99):
+            desc, icon, night = "Thunderstorm", "weather-storm", None
+        else:
+            desc, icon, night = "Unknown", "weather-none-available", None
+        return desc, (night if night and not is_day else icon)
+
+    def _render(self, ok, out):
+        try:
+            data = json.loads(out)
+            cur = data["current"]
+        except (ValueError, KeyError):
+            self.status.set_label("Weather is unavailable right now.")
+            return
+        desc, icon = self._describe(cur["weather_code"], cur.get("is_day", 1))
+        self.now_icon.set_from_icon_name(icon)
+        self.now_temp.set_label(f"{round(cur['temperature_2m'])}°C")
+        self.now_desc.set_label(desc)
+        self.details.set_label(f"Feels like {round(cur['apparent_temperature'])}°  ·  "
+                               f"Humidity {cur['relative_humidity_2m']}%  ·  Wind {round(cur['wind_speed_10m'])} km/h")
+        updated = time.strftime("%H:%M", time.localtime(data.get("_fetched", time.time())))
+        self.status.set_label(f"{data.get('_place', '')} · updated {updated}")
+
+        while (c := self.hours.get_first_child()) is not None:
+            self.hours.remove(c)
+        h = data["hourly"]
+        now_key = time.strftime("%Y-%m-%dT%H:00")
+        start = next((i for i, t in enumerate(h["time"]) if t >= now_key), 0)
+        for i in range(start + 1, min(start + 7, len(h["time"]))):
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            t = Gtk.Label(label=h["time"][i][11:16])
+            t.add_css_class("qp-stats")
+            col.append(t)
+            col.append(Gtk.Image(icon_name=self._describe(h["weather_code"][i], h["is_day"][i])[1], pixel_size=24))
+            col.append(Gtk.Label(label=f"{round(h['temperature_2m'][i])}°"))
+            rain = h.get("precipitation_probability", [None] * len(h["time"]))[i]
+            r = Gtk.Label(label=f"{rain}%" if rain else " ")
+            r.add_css_class("qp-stats")
+            col.append(r)
+            self.hours.append(col)
+
+        while (c := self.days.get_first_child()) is not None:
+            self.days.remove(c)
+        d = data["daily"]
+        for row, day in enumerate(d["time"]):
+            name = "Today" if row == 0 else time.strftime("%a", time.strptime(day, "%Y-%m-%d"))
+            ddesc, dicon = self._describe(d["weather_code"][row])
+            cells = [Gtk.Label(label=name, xalign=0, width_chars=6),
+                     Gtk.Image(icon_name=dicon, pixel_size=20, tooltip_text=ddesc),
+                     Gtk.Label(label=ddesc, xalign=0, hexpand=True, ellipsize=3),
+                     Gtk.Label(label=f"{d['precipitation_probability_max'][row] or 0}%", xalign=1),
+                     Gtk.Label(label=f"{round(d['temperature_2m_max'][row])}° / {round(d['temperature_2m_min'][row])}°",
+                               xalign=1)]
+            cells[3].add_css_class("qp-stats")
+            cells[2].add_css_class("qp-sub")
+            for col, w in enumerate(cells):
+                self.days.attach(w, col, row, 1, 1)
+
+
 class SettingsPage(Page):
     title = "Settings"
     has_switch = False
@@ -2218,7 +2329,8 @@ class QuickPanel(Adw.Application):
                       "volume": VolumePage(self), "night": NightPage(self),
                       "control": ControlPage(self), "start": StartPage(self),
                       "settings": SettingsPage(self), "calendar": CalendarPage(self),
-                      "appearance": AppearancePage(self), "clipboard": ClipboardPage(self)}
+                      "appearance": AppearancePage(self), "clipboard": ClipboardPage(self),
+                      "weather": WeatherPage(self)}
         for name, page in self.pages.items():
             self.stack.add_named(page, name)
         self.window.set_child(self.stack)
@@ -2295,7 +2407,9 @@ class QuickPanel(Adw.Application):
         page.set_back(bool(self.history))
         self.stack.set_visible_child_name(mode)
         page.opened()
-        LayerShell.set_anchor(self.window, LayerShell.Edge.RIGHT, self.pages[self.root].anchor == "right")
+        anchor = self.pages[self.root].anchor
+        LayerShell.set_anchor(self.window, LayerShell.Edge.RIGHT, anchor == "right")
+        LayerShell.set_anchor(self.window, LayerShell.Edge.LEFT, anchor == "left")
         self.window.set_default_size(-1, -1)
         self.backdrop.present()
         self.window.present()

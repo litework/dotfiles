@@ -53,3 +53,22 @@
 #custom-battery.bat-100 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-100.svg"); }
 #custom-battery.bat-100-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-100-charging.svg"); }
 #custom-battery.bat-100-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-100-charged.svg"); }
+
+/* Weather (classes from the weather script) */
+#custom-weather { padding-left: 26px; background-repeat: no-repeat; background-size: 18px 18px;
+  background-position: 4px center; }
+#custom-weather.w-clear { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-clear.svg"); }
+#custom-weather.w-clear-night { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-clear-night.svg"); }
+#custom-weather.w-few-clouds { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-few-clouds.svg"); }
+#custom-weather.w-few-clouds-night { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-few-clouds-night.svg"); }
+#custom-weather.w-clouds { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-clouds.svg"); }
+#custom-weather.w-clouds-night { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-clouds-night.svg"); }
+#custom-weather.w-overcast { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-overcast.svg"); }
+#custom-weather.w-fog { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-fog.svg"); }
+#custom-weather.w-showers-scattered { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-showers-scattered.svg"); }
+#custom-weather.w-showers { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-showers.svg"); }
+#custom-weather.w-freezing-rain { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-freezing-rain.svg"); }
+#custom-weather.w-snow-scattered { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-snow-scattered.svg"); }
+#custom-weather.w-snow { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-snow.svg"); }
+#custom-weather.w-storm { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-storm.svg"); }
+#custom-weather.w-none-available { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/weather-none-available.svg"); }
