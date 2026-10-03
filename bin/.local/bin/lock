@@ -4,7 +4,7 @@
 # crash), so you get a password prompt instead of sway's red "lock client died" screen.
 pgrep -x gtklock >/dev/null || pgrep -x swaylock >/dev/null && exit 0
 setsid -f sh -c '
-    gtklock
+    gtklock -s "$HOME/.config/gtklock/style.css" -b "$HOME/.local/state/wallpaper"
     [ $? -ne 0 ] && exec swaylock -f -C "$HOME/.cache/wallust/swaylock"
 ' >/dev/null 2>&1
 # Give the lock a moment to engage (swayidle before-sleep waits for this script).

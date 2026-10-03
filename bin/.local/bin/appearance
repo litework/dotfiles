@@ -7,7 +7,7 @@
   appearance apply            re-apply; run at login and by appearance.timer
   appearance sun              print today's sunrise and sunset
 
-Auto is dark from sunset to sunrise in Markham, Ontario. Sets the GNOME color-scheme
+Auto is dark from sunset to sunrise where you are (~/.config/location.conf). Sets the GNOME color-scheme
 (GTK4/libadwaita, Edge and other portal-aware apps), the GTK3 theme and the
 icon theme, and xsettingsd for XWayland GTK apps such as Thunar. The taskbar
 and flyouts stay dark either way.
@@ -18,7 +18,23 @@ import os
 import subprocess
 import sys
 
-LAT, LON = 43.9, -79.3   # Markham, Ontario, city precision
+
+def load_location():
+    """PLACE, LAT, LON from ~/.config/location.conf (defaults: Markham, Ontario)."""
+    loc = {"PLACE": "Markham", "LAT": "43.9", "LON": "-79.3"}
+    try:
+        with open(os.path.expanduser("~/.config/location.conf")) as f:
+            for line in f:
+                key, sep, value = line.strip().partition("=")
+                if sep and key in loc:
+                    loc[key] = value.strip()
+    except OSError:
+        pass
+    return loc["PLACE"], float(loc["LAT"]), float(loc["LON"])
+
+
+PLACE, LAT, LON = load_location()
+
 STATE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "appearance")
 XSETTINGS = os.path.expanduser("~/.config/xsettingsd/xsettingsd.conf")
 THEMES = {
