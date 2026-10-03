@@ -1781,6 +1781,100 @@ class StartPage(Page):
         GLib.idle_add(self.search.grab_focus)
 
 
+CLIP_CACHE = os.path.join(GLib.get_user_cache_dir(), "quick-panel", "clipboard")
+TERMINALS = {"foot", "footclient", "scratchpad", "kitty", "alacritty", "org.wezfurlong.wezterm"}
+
+
+class ClipboardPage(Page):
+    """Clipboard history (cliphist), like Windows' Win+V: pick an item to paste it."""
+    title = "Clipboard"
+    has_switch = False
+    has_refresh = False
+    has_status = False
+    anchor = "center"
+    width = 420
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        clear = Gtk.Button(label="Clear all")
+        clear.add_css_class("flat")
+        clear.connect("clicked", lambda *_: run(["cliphist", "wipe"], lambda *_: self.opened()))
+        self.title_label.get_parent().append(clear)
+        self.list.connect("row-activated", lambda _l, row: getattr(row, "qp_paste", lambda: None)())
+        self.target = ""
+
+    def opened(self):
+        # Remember which window to paste into before our flyout takes the keyboard.
+        run(["swaymsg", "-t", "get_tree", "-r"], self._got_focus)
+        run(["cliphist", "list"], self._render)
+
+    def _got_focus(self, ok, out):
+        def find(node):
+            if node.get("focused") and node.get("pid"):
+                return node.get("app_id") or (node.get("window_properties") or {}).get("class") or ""
+            for c in node.get("nodes", []) + node.get("floating_nodes", []):
+                found = find(c)
+                if found is not None:
+                    return found
+            return None
+        try:
+            self.target = find(json.loads(out)) or ""
+        except ValueError:
+            self.target = ""
+
+    def _render(self, ok, out):
+        self.list.clear()
+        entries = [l.split("\t", 1) for l in out.splitlines() if "\t" in l][:30]
+        if not entries:
+            self.placeholder("Nothing copied yet. Copy something and it will show up here.")
+            return
+        os.makedirs(CLIP_CACHE, exist_ok=True)
+        for cid, preview in entries:
+            self.list.append(self._row(cid, preview))
+        first = self.list.get_row_at_index(0)
+        if first:
+            GLib.idle_add(first.grab_focus)
+
+    def _row(self, cid, preview):
+        row = Gtk.ListBoxRow(activatable=True)
+        box = Gtk.Box(spacing=8)
+        m = re.match(r"\[\[ binary data .* (png|jpe?g|gif|webp|bmp) (\d+)x(\d+) \]\]", preview)
+        if m:
+            path = os.path.join(CLIP_CACHE, f"{cid}.{m.group(1)}")
+            picture = Gtk.Picture(can_shrink=True, content_fit=Gtk.ContentFit.CONTAIN, hexpand=True,
+                                  height_request=70, halign=Gtk.Align.START)
+            if os.path.exists(path):
+                picture.set_filename(path)
+            else:
+                run(["sh", "-c", 'cliphist decode "$1" > "$2"', "sh", cid, path],
+                    lambda ok, _o, pic=picture, pth=path: ok and pic.set_filename(pth))
+            box.append(picture)
+        else:
+            text = Gtk.Label(label=preview.strip(), xalign=0, hexpand=True, wrap=True, wrap_mode=2,
+                             lines=3, ellipsize=3, max_width_chars=44)
+            box.append(text)
+        delete = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Remove", valign=Gtk.Align.START)
+        delete.add_css_class("flat")
+        delete.connect("clicked", lambda *_: run(["sh", "-c", 'printf "%s\\t%s\\n" "$1" "$2" | cliphist delete',
+                                                  "sh", cid, preview], lambda *_: self.opened()))
+        box.append(delete)
+        row.set_child(box)
+        row.add_css_class("qp-notif")
+        row.set_margin_bottom(6)
+        row.qp_paste = lambda: self._paste(cid)
+        return row
+
+    def _paste(self, cid):
+        target = self.target
+        self.panel.hide_panel()
+        keys = "ctrl+shift+v" if target.lower() in TERMINALS else "ctrl+v"
+        mods = ["-M", "ctrl"] + (["-M", "shift"] if "shift" in keys else [])
+        # Copy, then paste into the window that had focus once our flyout has let go of the keyboard.
+        script = ('cliphist decode "$1" | wl-copy && sleep 0.15 && wtype ' + " ".join(mods) +
+                  ' -k v -m ctrl' + (" -m shift" if "shift" in keys else ""))
+        spawn(["sh", "-c", script, "sh", cid])
+
+
 class SettingsPage(Page):
     title = "Settings"
     has_switch = False
@@ -2124,7 +2218,7 @@ class QuickPanel(Adw.Application):
                       "volume": VolumePage(self), "night": NightPage(self),
                       "control": ControlPage(self), "start": StartPage(self),
                       "settings": SettingsPage(self), "calendar": CalendarPage(self),
-                      "appearance": AppearancePage(self)}
+                      "appearance": AppearancePage(self), "clipboard": ClipboardPage(self)}
         for name, page in self.pages.items():
             self.stack.add_named(page, name)
         self.window.set_child(self.stack)

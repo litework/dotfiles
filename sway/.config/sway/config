@@ -78,7 +78,7 @@ bindsym $mod+Escape reload
 bindsym $mod+alt+Escape exec swaynag -t warning -m 'Exit sway?' -B 'Exit' 'swaymsg exit'
 bindsym $mod+shift+Escape exec swaylock -f -C ~/.cache/wallust/swaylock
 bindsym $mod+x exec ~/.local/bin/powermenu
-bindsym $mod+v exec cliphist list | fuzzel --dmenu --prompt 'clipboard> ' --width 60 | cliphist decode | wl-copy
+bindsym $mod+v exec ~/.local/bin/quick-panel clipboard
 
 bindsym $mod+F1 [app_id="scratchpad"] scratchpad show
 bindsym $mod+F2 exec $term --app-id=yazi yazi
