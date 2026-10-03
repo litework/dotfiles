@@ -1,0 +1,42 @@
+#!/bin/sh
+# bar-icon network|volume|battery — state for a waybar custom module (return-type json).
+# The "class" selects a Papirus panel icon in ~/.config/waybar/papirus.css (CSS background,
+# because waybar's image module hangs with gdk-pixbuf's glycin loaders).
+json() { printf '{"text": " ", "class": "%s", "tooltip": "%s"}\n' "$1" "$(printf '%s' "$2" | sed 's/["\\]/\\&/g')"; }
+
+case "${1:-}" in
+network)
+    state=$(nmcli -t -f TYPE,STATE device 2>/dev/null)
+    if echo "$state" | grep -q '^wifi:connected'; then
+        line=$(nmcli -t -f IN-USE,SIGNAL,SSID device wifi list --rescan no 2>/dev/null | grep '^\*' | head -1)
+        signal=$(echo "$line" | cut -d: -f2)
+        ssid=$(echo "$line" | cut -d: -f3-)
+        level=$(( (${signal:-0} + 10) / 20 * 20 ))
+        [ "$level" -gt 100 ] && level=100
+        json "wifi-$level" "${ssid:-Wi-Fi} (${signal:-?}%)"
+    elif echo "$state" | grep -q '^ethernet:connected'; then
+        json wired "Ethernet"
+    else
+        json wifi-offline "Not connected"
+    fi ;;
+volume)
+    out=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null)
+    vol=$(echo "$out" | awk '{printf "%d", $2 * 100}')
+    case "$out" in *MUTED*) json vol-muted "Muted"; exit 0 ;; esac
+    if [ "${vol:-0}" -eq 0 ]; then cls=vol-muted
+    elif [ "$vol" -lt 34 ]; then cls=vol-low
+    elif [ "$vol" -lt 67 ]; then cls=vol-medium
+    else cls=vol-high; fi
+    json "$cls" "Volume $vol%" ;;
+battery)
+    bat=/sys/class/power_supply/BAT0
+    cap=$(cat "$bat/capacity" 2>/dev/null || echo 0)
+    level=$(printf '%03d' $(( cap / 10 * 10 )))
+    case "$(cat "$bat/status" 2>/dev/null)" in
+        Charging) json "bat-$level-charging" "Battery $cap% · charging" ;;
+        Full|"Not charging") json "bat-$level-charged" "Battery $cap% · plugged in" ;;
+        *) json "bat-$level" "Battery $cap%" ;;
+    esac ;;
+*)
+    echo "usage: bar-icon network|volume|battery" >&2; exit 1 ;;
+esac

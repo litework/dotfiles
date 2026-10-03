@@ -28,13 +28,11 @@ client.unfocused        $color8    $color0    $color7    $color8    $color8
 client.urgent           $color1    $color1    $color0    $color1    $color1
 
 ### Theme
-# Dark GTK/libadwaita apps (Qt 6 follows color-scheme via the portal).
+# Light/dark mode for apps is handled by `appearance` (auto follows the sun);
+# xsettingsd passes it to XWayland GTK apps like Thunar.
 seat seat0 xcursor_theme capitaine-cursors 24
 exec_always {
-    gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
-    gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark'
     gsettings set org.gnome.desktop.interface cursor-theme 'capitaine-cursors'
-    gsettings set org.gnome.desktop.interface icon-theme 'Papirus-Dark'
     gsettings set org.gnome.desktop.interface cursor-size 24
     gsettings set org.gnome.desktop.interface monospace-font-name 'Pragmata Pro Mono 11'
 }
@@ -62,6 +60,8 @@ exec foot --server
 exec ~/.local/bin/wallpaper
 exec mako --config ~/.cache/wallust/mako
 exec ~/.local/bin/quick-panel-service --daemon
+exec_always ~/.local/bin/appearance apply
+exec xsettingsd
 exec wl-paste --watch cliphist store
 exec ~/.local/bin/nightlight apply
 exec foot --app-id=scratchpad
@@ -176,9 +176,9 @@ bindsym $mod+Tab workspace back_and_forth
 
 
 ### Keys: media
-bindsym --locked XF86AudioRaiseVolume exec wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+
-bindsym --locked XF86AudioLowerVolume exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
-bindsym --locked XF86AudioMute exec wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
+bindsym --locked XF86AudioRaiseVolume exec wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ && pkill -RTMIN+11 -x waybar
+bindsym --locked XF86AudioLowerVolume exec wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && pkill -RTMIN+11 -x waybar
+bindsym --locked XF86AudioMute exec wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle && pkill -RTMIN+11 -x waybar
 bindsym --locked XF86AudioMicMute exec wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle
 bindsym --locked XF86MonBrightnessUp exec brightnessctl -q set 5%+ && pkill -RTMIN+8 -x waybar
 bindsym --locked XF86MonBrightnessDown exec brightnessctl -q set 5%- && pkill -RTMIN+8 -x waybar

@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""appearance — light/dark mode for apps.
+
+  appearance                  print the mode: dark, light, auto-dark or auto-light
+  appearance auto|dark|light  set the mode and apply it
+  appearance toggle           switch dark <-> light (turns auto off)
+  appearance apply            re-apply; run at login and by appearance.timer
+  appearance sun              print today's sunrise and sunset
+
+Auto is dark from sunset to sunrise in Toronto. Sets the GNOME color-scheme
+(GTK4/libadwaita, Edge and other portal-aware apps), the GTK3 theme and the
+icon theme, and xsettingsd for XWayland GTK apps such as Thunar. The taskbar
+and flyouts stay dark either way.
+"""
+import datetime as dt
+import math
+import os
+import subprocess
+import sys
+
+LAT, LON = 43.7, -79.4   # Toronto, city precision (from the system timezone)
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "appearance")
+XSETTINGS = os.path.expanduser("~/.config/xsettingsd/xsettingsd.conf")
+THEMES = {
+    True: {"scheme": "prefer-dark", "gtk": "Adwaita-dark", "icons": "Papirus-Dark"},
+    False: {"scheme": "prefer-light", "gtk": "Adwaita", "icons": "Papirus"},
+}
+
+
+def sun_times(day=None):
+    """Sunrise and sunset (local, aware datetimes) via the NOAA approximation."""
+    day = day or dt.date.today()
+    g = 2 * math.pi / 365 * (day.timetuple().tm_yday - 1)
+    eqtime = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                       - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g)
+            + 0.000907 * math.sin(2 * g) - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    lat = math.radians(LAT)
+    ha = math.degrees(math.acos(math.cos(math.radians(90.833)) / (math.cos(lat) * math.cos(decl))
+                                - math.tan(lat) * math.tan(decl)))
+    midnight = dt.datetime.combine(day, dt.time(), tzinfo=dt.timezone.utc)
+    to_local = lambda minutes: (midnight + dt.timedelta(minutes=minutes)).astimezone()
+    return to_local(720 - 4 * (LON + ha) - eqtime), to_local(720 - 4 * (LON - ha) - eqtime)
+
+
+def read_mode():
+    try:
+        with open(STATE) as f:
+            mode = f.read().strip()
+    except OSError:
+        mode = "auto"
+    return mode if mode in ("auto", "dark", "light") else "auto"
+
+
+def is_dark(mode):
+    if mode != "auto":
+        return mode == "dark"
+    sunrise, sunset = sun_times()
+    now = dt.datetime.now().astimezone()
+    return not (sunrise <= now < sunset)
+
+
+def gset(key, value):
+    current = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", key],
+                             capture_output=True, text=True).stdout.strip().strip("'")
+    if current != value:
+        subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", key, value], check=False)
+
+
+def apply():
+    theme = THEMES[is_dark(read_mode())]
+    gset("color-scheme", theme["scheme"])
+    gset("gtk-theme", theme["gtk"])
+    gset("icon-theme", theme["icons"])
+
+    conf = (f'Net/ThemeName "{theme["gtk"]}"\n'
+            f'Net/IconThemeName "{theme["icons"]}"\n'
+            'Gtk/CursorThemeName "capitaine-cursors"\n'
+            'Gtk/CursorThemeSize 24\n')
+    try:
+        with open(XSETTINGS) as f:
+            unchanged = f.read() == conf
+    except OSError:
+        unchanged = False
+    if not unchanged:
+        os.makedirs(os.path.dirname(XSETTINGS), exist_ok=True)
+        with open(XSETTINGS, "w") as f:
+            f.write(conf)
+        subprocess.run(["pkill", "-HUP", "-x", "xsettingsd"], check=False)
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "status"
+    mode = read_mode()
+    if cmd == "status":
+        print(f"auto-{'dark' if is_dark('auto') else 'light'}" if mode == "auto" else mode)
+        return 0
+    if cmd == "sun":
+        sunrise, sunset = sun_times()
+        print(f"sunrise {sunrise:%H:%M}, sunset {sunset:%H:%M}")
+        return 0
+    if cmd in ("auto", "dark", "light", "toggle"):
+        if cmd == "toggle":
+            cmd = "light" if is_dark(mode) else "dark"
+        os.makedirs(os.path.dirname(STATE), exist_ok=True)
+        with open(STATE, "w") as f:
+            f.write(cmd + "\n")
+    elif cmd != "apply":
+        print(__doc__.strip(), file=sys.stderr)
+        return 1
+    apply()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

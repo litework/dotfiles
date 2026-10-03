@@ -1,0 +1,60 @@
+/* papirus.css — Papirus panel icons for the taskbar, as CSS backgrounds.
+   Generated from /usr/share/icons/Papirus-Dark/24x24/panel; classes come from bar-icon. */
+#custom-start, #custom-network, #custom-volume, #custom-battery {
+  background-repeat: no-repeat;
+  background-position: center;
+}
+#custom-start {
+  min-width: 20px;
+  background-size: 20px 20px;
+  background-image: url("/usr/share/icons/Papirus/32x32/apps/start-here-archlinux.svg");
+}
+#custom-network, #custom-volume, #custom-battery {
+  min-width: 16px;
+  background-size: 16px 16px;
+}
+#custom-network.wifi-0 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wireless-0.svg"); }
+#custom-network.wifi-20 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wireless-20.svg"); }
+#custom-network.wifi-40 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wireless-40.svg"); }
+#custom-network.wifi-60 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wireless-60.svg"); }
+#custom-network.wifi-80 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wireless-80.svg"); }
+#custom-network.wifi-100 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wireless-100.svg"); }
+#custom-network.wifi-offline { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wireless-offline.svg"); }
+#custom-network.wired { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/network-wired.svg"); }
+#custom-volume.vol-high { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/audio-volume-high.svg"); }
+#custom-volume.vol-medium { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/audio-volume-medium.svg"); }
+#custom-volume.vol-low { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/audio-volume-low.svg"); }
+#custom-volume.vol-muted { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/audio-volume-muted.svg"); }
+#custom-battery.bat-000 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-000.svg"); }
+#custom-battery.bat-000-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-000-charging.svg"); }
+#custom-battery.bat-000-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-000-charging.svg"); }
+#custom-battery.bat-010 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-010.svg"); }
+#custom-battery.bat-010-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-010-charging.svg"); }
+#custom-battery.bat-010-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-010-charging.svg"); }
+#custom-battery.bat-020 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-020.svg"); }
+#custom-battery.bat-020-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-020-charging.svg"); }
+#custom-battery.bat-020-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-020-charging.svg"); }
+#custom-battery.bat-030 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-030.svg"); }
+#custom-battery.bat-030-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-030-charging.svg"); }
+#custom-battery.bat-030-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-030-charging.svg"); }
+#custom-battery.bat-040 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-040.svg"); }
+#custom-battery.bat-040-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-040-charging.svg"); }
+#custom-battery.bat-040-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-040-charging.svg"); }
+#custom-battery.bat-050 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-050.svg"); }
+#custom-battery.bat-050-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-050-charging.svg"); }
+#custom-battery.bat-050-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-050-charging.svg"); }
+#custom-battery.bat-060 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-060.svg"); }
+#custom-battery.bat-060-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-060-charging.svg"); }
+#custom-battery.bat-060-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-060-charging.svg"); }
+#custom-battery.bat-070 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-070.svg"); }
+#custom-battery.bat-070-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-070-charging.svg"); }
+#custom-battery.bat-070-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-070-charging.svg"); }
+#custom-battery.bat-080 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-080.svg"); }
+#custom-battery.bat-080-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-080-charging.svg"); }
+#custom-battery.bat-080-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-080-charging.svg"); }
+#custom-battery.bat-090 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-090.svg"); }
+#custom-battery.bat-090-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-090-charging.svg"); }
+#custom-battery.bat-090-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-090-charging.svg"); }
+#custom-battery.bat-100 { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-100.svg"); }
+#custom-battery.bat-100-charging { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-100-charging.svg"); }
+#custom-battery.bat-100-charged { background-image: url("/usr/share/icons/Papirus-Dark/24x24/panel/battery-100-charged.svg"); }

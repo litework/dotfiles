@@ -17,6 +17,8 @@ The previous bspwm/X11 setup lives in [litework/dotfiles-archive](https://github
 | Music        | `mpd` + `ncmpcpp`                         | —                        |
 | Network      | NetworkManager                             | dhcpcd + wpa_supplicant  |
 | Shell UI     | `quick-panel` (GTK4 + layer-shell): Start menu, Quick settings, Wi-Fi/Bluetooth/Sound/Night light pages, Settings, calendar; Bluetooth pairing agent | blueman, rofi menus |
+| Icons        | Papirus (apps, taskbar, menus)               | Adwaita                  |
+| Light/dark   | `appearance`: auto by sunrise/sunset, or manual; gsettings + `xsettingsd` | always dark |
 | Audio        | PipeWire (`wireplumber`, `wpctl`)          | PulseAudio               |
 | Screenshots  | `grim` + `slurp`                          | `scrot`                  |
 

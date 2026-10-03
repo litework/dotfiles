@@ -1,5 +1,6 @@
 /* ~/.config/waybar/style.css — Windows 11-style taskbar; colors from wallust */
 @import "colors.css"; /* written by wallust */
+@import "papirus.css"; /* taskbar icons */
 
 * {
   font-family: "Pragmata Pro Mono", "Symbols Nerd Font";
@@ -22,14 +23,14 @@ window#waybar {
 #clock {
   margin: 3px 1px;
   border-radius: 6px;
-  background: transparent;
+  background-color: transparent;
 }
 #workspaces button:hover,
 #custom-start:hover,
 #taskbar button:hover,
 #status:hover,
 #clock:hover {
-  background: alpha(@foreground, 0.12);
+  background-color: alpha(@foreground, 0.12);
 }
 
 #workspaces { margin-left: 4px; }
@@ -38,7 +39,7 @@ window#waybar {
 #workspaces button.urgent { color: @color1; }
 #mode { color: @color0; background: @color7; padding: 0 8px; margin: 3px 2px; border-radius: 6px; }
 
-#custom-start { font-family: "JetBrainsMono Nerd Font"; font-size: 18px; padding: 0 12px; color: @color4; }
+#custom-start { padding: 0 10px; }
 
 #taskbar button { padding: 0 8px; border-bottom: 2px solid transparent; }
 #taskbar button.active { background: alpha(@foreground, 0.10); border-bottom: 2px solid @color4; }
@@ -46,9 +47,6 @@ window#waybar {
 #tray { padding: 0 8px; }
 
 #status { padding: 0 6px; }
-#network, #wireplumber, #battery { font-size: 15px; padding: 0 5px; }
-#network.disconnected, #network.disabled, #wireplumber.muted { color: @color8; }
-#battery.warning { color: @color3; }
-#battery.critical { color: @color1; }
+#custom-network, #custom-volume, #custom-battery { padding: 0 5px; }
 
 #clock { padding: 0 10px; margin-right: 6px; font-size: 11px; }

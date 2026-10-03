@@ -1,0 +1,6 @@
+[Unit]
+Description=Apply light/dark mode (appearance auto follows the sun)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/appearance apply

@@ -12,7 +12,7 @@
   "sway/workspaces": { "disable-scroll": true },
 
   "custom/start": {
-    "format": "\uf303",
+    "format": " ",
     "tooltip": false,
     "on-click": "~/.local/bin/quick-panel start"
   },
@@ -29,37 +29,31 @@
 
   "tray": { "spacing": 8, "icon-size": 16 },
 
+  // Papirus panel icons: bar-icon prints a state class, papirus.css maps it to an icon.
   "group/status": {
     "orientation": "horizontal",
-    "modules": ["network", "wireplumber", "battery"]
+    "modules": ["custom/network", "custom/volume", "custom/battery"]
   },
-  "network": {
-    "format-wifi": "{icon}",
-    "format-ethernet": "󰈀",
-    "format-disconnected": "󰤮",
-    "format-disabled": "󰤮",
-    "format-icons": ["󰤟", "󰤢", "󰤥", "󰤨"],
-    "tooltip-format-wifi": "{essid} ({signalStrength}%)",
-    "tooltip-format-disconnected": "Not connected",
+  "custom/network": {
+    "exec": "~/.local/bin/bar-icon network",
+    "return-type": "json",
+    "interval": 5,
     "on-click": "~/.local/bin/quick-panel control"
   },
-  "wireplumber": {
-    "format": "{icon}",
-    "format-muted": "󰝟",
-    "format-icons": ["󰕿", "󰖀", "󰕾"],
-    "scroll-step": 5,
-    "tooltip-format": "Volume {volume}%",
+  "custom/volume": {
+    "exec": "~/.local/bin/bar-icon volume",
+    "return-type": "json",
+    "interval": 5,
+    "signal": 11,
     "on-click": "~/.local/bin/quick-panel control",
-    "on-click-middle": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+    "on-click-middle": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle && pkill -RTMIN+11 -x waybar",
+    "on-scroll-up": "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+ && pkill -RTMIN+11 -x waybar",
+    "on-scroll-down": "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%- && pkill -RTMIN+11 -x waybar"
   },
-  "battery": {
-    "bat": "BAT0",
-    "states": { "warning": 25, "critical": 10 },
-    "format": "{icon}",
-    "format-charging": "󰂄",
-    "format-plugged": "󰚥",
-    "format-icons": ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
-    "tooltip-format": "Battery {capacity}%",
+  "custom/battery": {
+    "exec": "~/.local/bin/bar-icon battery",
+    "return-type": "json",
+    "interval": 30,
     "on-click": "~/.local/bin/quick-panel control"
   },
 

@@ -760,13 +760,18 @@ class ThrottledScale(Gtk.Box):
         pass
 
 
+def refresh_bar_volume():
+    """Tell waybar's volume icon (signal 11) to update now."""
+    run(["pkill", "-RTMIN+11", "-x", "waybar"])
+
+
 class VolumeSlider(ThrottledScale):
     def __init__(self):
         self.muted = False
         self.mute_button = Gtk.Button(icon_name="audio-volume-high-symbolic", tooltip_text="Mute")
         self.mute_button.add_css_class("flat")
         self.mute_button.connect("clicked", lambda *_: run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
-                                                            lambda *_: self.refresh()))
+                                                            lambda *_: (self.refresh(), refresh_bar_volume())))
         super().__init__(self.mute_button)
 
     def _icon(self, vol):
@@ -793,7 +798,7 @@ class VolumeSlider(ThrottledScale):
         self.mute_button.set_icon_name(self._icon(vol))
 
     def write_cmd(self, vol):
-        return ["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", f"{vol}%"]
+        return ["sh", "-c", f"wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ {vol}% && pkill -RTMIN+11 -x waybar"]
 
 
 class BrightnessSlider(ThrottledScale):
@@ -889,7 +894,8 @@ class NightPage(Page):
         schedule = Gtk.Box(spacing=8, margin_top=6)
         labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
         labels.append(Gtk.Label(label="Follow the sun", xalign=0))
-        sub = Gtk.Label(label="Fades in at sunset and out at sunrise (Toronto)", xalign=0, wrap=True)
+        sub = Gtk.Label(label="Fades in at sunset and out at sunrise (Toronto)", xalign=0, wrap=True,
+                        max_width_chars=30)
         sub.add_css_class("qp-sub")
         labels.append(sub)
         self.schedule_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
@@ -992,6 +998,73 @@ class Tile(Gtk.Box):
         self.label.set_label(label or self.label_text)
 
 
+APPEARANCE = os.path.expanduser("~/.local/bin/appearance")
+
+
+class AppearancePage(Page):
+    """Light/dark mode for apps; the taskbar and flyouts stay dark."""
+    title = "Appearance"
+    has_switch = False
+    has_list = False
+    has_refresh = False
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.mode = "auto"
+
+        modes = Gtk.Box(homogeneous=True, margin_top=6)
+        modes.add_css_class("linked")
+        self.light = Gtk.ToggleButton(label="Light")
+        self.dark = Gtk.ToggleButton(label="Dark", group=self.light)
+        self.light_handler = self.light.connect("toggled", lambda b: b.get_active() and self._set("light"))
+        self.dark_handler = self.dark.connect("toggled", lambda b: b.get_active() and self._set("dark"))
+        modes.append(self.light)
+        modes.append(self.dark)
+
+        schedule = Gtk.Box(spacing=8, margin_top=8)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        labels.append(Gtk.Label(label="Follow the sun", xalign=0))
+        self.sun_label = Gtk.Label(xalign=0, wrap=True, max_width_chars=30)
+        self.sun_label.add_css_class("qp-sub")
+        labels.append(self.sun_label)
+        self.auto = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.auto_handler = self.auto.connect("notify::active", self._on_auto)
+        schedule.append(labels)
+        schedule.append(self.auto)
+
+        note = Gtk.Label(label="Apps switch between light and dark. The taskbar, menus and terminal stay dark.",
+                         xalign=0, wrap=True, margin_top=6, max_width_chars=36)
+        note.add_css_class("qp-sub")
+        self.add_body(modes, schedule, note)
+
+    def opened(self):
+        run([APPEARANCE, "sun"], lambda ok, out: self.sun_label.set_label(
+            "Light from sunrise to sunset in Toronto (today " + out.strip().replace("sunrise ", "").replace(", sunset ", "–") + ")"))
+        self.refresh()
+
+    def refresh(self):
+        run([APPEARANCE], self._got)
+
+    def _got(self, ok, out):
+        self.mode = out.strip()
+        dark = self.mode.endswith("dark")
+        auto = self.mode.startswith("auto")
+        for button, handler, active in ((self.light, self.light_handler, not dark), (self.dark, self.dark_handler, dark)):
+            button.handler_block(handler)
+            button.set_active(active)
+            button.handler_unblock(handler)
+        self.auto.handler_block(self.auto_handler)
+        self.auto.set_active(auto)
+        self.auto.handler_unblock(self.auto_handler)
+        self.status.set_label(("Dark" if dark else "Light") + (" · follows the sun" if auto else ""))
+
+    def _set(self, mode):
+        run([APPEARANCE, mode], lambda *_: self.refresh())
+
+    def _on_auto(self, *_):
+        self._set("auto" if self.auto.get_active() else ("dark" if self.mode.endswith("dark") else "light"))
+
+
 class ControlPage(Page):
     """Quick settings: tiles, brightness and volume, battery and system stats."""
     has_header = False
@@ -1023,6 +1096,10 @@ class ControlPage(Page):
         grid.attach(self.bt, 1, 0, 1, 1)
         grid.attach(self.night, 2, 0, 1, 1)
         grid.attach(self.dnd, 0, 1, 1, 1)
+        self.theme = Tile("preferences-desktop-appearance-symbolic", "Dark mode",
+                          lambda on: run([APPEARANCE, "dark" if on else "light"], lambda *_: self.refresh()),
+                          lambda: nav("appearance"))
+        grid.attach(self.theme, 1, 1, 1, 1)
 
         self.brightness = BrightnessSlider()
         self.volume = VolumeSlider()
@@ -1076,6 +1153,8 @@ class ControlPage(Page):
         state = dict(l.partition("=")[::2] for l in read(NIGHT_STATE).splitlines() if "=" in l)
         self.night.set_state(state.get("enabled", "1") == "1")
         run(["makoctl", "mode"], lambda ok, out: self.dnd.set_state("do-not-disturb" in out.split()))
+        run([APPEARANCE], lambda ok, out: self.theme.set_state(
+            out.strip().endswith("dark"), ("Dark" if out.strip().endswith("dark") else "Light") + " mode"))
 
         self.brightness.refresh()
         self.volume.refresh()
@@ -1343,6 +1422,8 @@ class SettingsPage(Page):
             ("bluetooth-active-symbolic", "Bluetooth & devices", "Pair and connect devices", lambda: nav("bluetooth")),
             ("audio-volume-high-symbolic", "Sound", "Volume and output device", lambda: nav("volume")),
             (NIGHT_ICON, "Night light", "Warmer colours in the evening", lambda: nav("night")),
+            ("preferences-desktop-appearance-symbolic", "Light and dark mode", "Switch automatically at sunset",
+             lambda: nav("appearance")),
             ("preferences-desktop-wallpaper-symbolic", "Personalization", "Change wallpaper and colours",
              self.pick_wallpaper),
             ("input-mouse-symbolic", "Mouse", "Buttons, DPI and lighting", external(["piper"])),
@@ -1543,7 +1624,8 @@ class QuickPanel(Adw.Application):
         self.pages = {"wifi": WifiPage(self), "bluetooth": BluetoothPage(self),
                       "volume": VolumePage(self), "night": NightPage(self),
                       "control": ControlPage(self), "start": StartPage(self),
-                      "settings": SettingsPage(self), "calendar": CalendarPage(self)}
+                      "settings": SettingsPage(self), "calendar": CalendarPage(self),
+                      "appearance": AppearancePage(self)}
         for name, page in self.pages.items():
             self.stack.add_named(page, name)
         self.window.set_child(self.stack)
@@ -1567,7 +1649,7 @@ class QuickPanel(Adw.Application):
         elif mode in ("--daemon", None):
             pass
         else:
-            cmdline.printerr("usage: quick-panel-service [start|control|calendar|settings|wifi|bluetooth|volume|night|--daemon]\n")
+            cmdline.printerr("usage: quick-panel-service [start|control|calendar|settings|appearance|wifi|bluetooth|volume|night|--daemon]\n")
             return 2
         return 0
 
@@ -1626,5 +1708,6 @@ class QuickPanel(Adw.Application):
 
 if __name__ == "__main__":
     Adw.init()
-    Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.PREFER_DARK)
+    # The shell always matches the dark taskbar; `appearance` only switches apps.
+    Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
     sys.exit(QuickPanel().run(sys.argv))
