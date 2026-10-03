@@ -6,7 +6,7 @@ The previous bspwm/X11 setup lives in [litework/dotfiles-archive](https://github
 | Role         | Program                                   | Replaced                 |
 |--------------|-------------------------------------------|--------------------------|
 | Compositor   | `sway` (+ `swayidle`, `swaylock`, `swaybg`) | `bspwm` + `sxhkd`, `compton` |
-| Bar          | `waybar`                                  | `polybar` / `lemonbar`   |
+| Taskbar      | `waybar`, Windows 11 layout: workspaces · Start + open windows · tray, status icons, clock | `polybar` / `lemonbar`   |
 | Launcher     | `fuzzel`                                  | `rofi`                   |
 | Notifications| `mako`                                    | —                        |
 | Terminal     | `foot` (server + `footclient`)            | `urxvt` / `urxvtd`       |
@@ -16,7 +16,7 @@ The previous bspwm/X11 setup lives in [litework/dotfiles-archive](https://github
 | Files        | `yazi`                                    | `ranger`                 |
 | Music        | `mpd` + `ncmpcpp`                         | —                        |
 | Network      | NetworkManager                             | dhcpcd + wpa_supplicant  |
-| Quick settings | `quick-panel`: Wi-Fi, Bluetooth (+ pairing agent), Sound and Night light flyouts (GTK4 + layer-shell); click the bar | blueman |
+| Shell UI     | `quick-panel` (GTK4 + layer-shell): Start menu, Quick settings, Wi-Fi/Bluetooth/Sound/Night light pages, Settings, calendar; Bluetooth pairing agent | blueman, rofi menus |
 | Audio        | PipeWire (`wireplumber`, `wpctl`)          | PulseAudio               |
 | Screenshots  | `grim` + `slurp`                          | `scrot`                  |
 
@@ -45,7 +45,7 @@ Each top-level directory is a [GNU Stow](https://www.gnu.org/software/stow/) pac
 
 | Keys | Action |
 |------|--------|
-| `Super+Return` / `Super+Space` | terminal / launcher |
+| `Super+Return` / `Super+Space` | terminal / Start menu |
 | `Super+h/j/k/l` (`+Shift`) | focus (move) window |
 | `Super+1…0` (`+Shift`) | workspace (move window to it) |
 | `Super+;` / `Super+'` / `Super+Tab` | prev / next / last workspace |

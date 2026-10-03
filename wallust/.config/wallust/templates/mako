@@ -6,3 +6,6 @@ progress-color=over {{color8}}
 
 [urgency=high]
 border-color={{color1}}
+
+[mode=do-not-disturb]
+invisible=1

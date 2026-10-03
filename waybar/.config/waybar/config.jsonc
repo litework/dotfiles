@@ -1,93 +1,72 @@
-// ~/.config/waybar/config.jsonc — replaces polybar (same module layout)
+// ~/.config/waybar/config.jsonc — Windows 11-style taskbar.
+// Workspaces left; Start + open windows centred; tray, status icons and clock right.
+// Start, the status icons and the clock open quick-panel flyouts.
 {
   "position": "bottom",
-  "height": 22,
-  "spacing": 4,
-  "modules-left": ["custom/power", "sway/workspaces", "sway/mode", "mpd"],
-  "modules-center": ["clock"],
-  "modules-right": ["cpu", "memory", "wireplumber", "custom/brightness", "custom/night", "battery", "custom/mouse", "tray", "network", "bluetooth"],
+  "height": 32,
+  "spacing": 2,
+  "modules-left": ["sway/workspaces", "sway/mode"],
+  "modules-center": ["custom/start", "wlr/taskbar"],
+  "modules-right": ["tray", "group/status", "clock"],
 
-  "custom/power": {
-    "format": "⏻",
-    "tooltip": false,
-    "on-click": "~/.local/bin/powermenu"
-  },
   "sway/workspaces": { "disable-scroll": true },
-  "mpd": {
-    "format": "{stateIcon} {artist} - {title}",
-    "format-stopped": "",
-    "format-disconnected": "",
-    "state-icons": { "playing": "", "paused": "" },
-    "max-length": 40,
-    "on-click": "mpc toggle"
-  },
-  "clock": {
-    "format": "{:%a %d %b  %H:%M}",
-    "tooltip-format": "<tt>{calendar}</tt>"
-  },
-  "cpu": { "format": "CPU {usage}%", "interval": 5 },
-  "memory": { "format": "RAM {percentage}%", "interval": 10, "tooltip-format": "{used:0.1f} / {total:0.1f} GiB used" },
-  "bluetooth": {
-    "format": "󰂯",
-    "format-connected": "󰂱 {device_alias}",
-    "format-disabled": "󰂲",
-    "format-off": "󰂲",
-    "tooltip-format-connected": "{device_enumerate}",
-    "tooltip-format-enumerate-connected": "{device_alias}",
-    "on-click": "~/.local/bin/quick-panel bluetooth"
-  },
-  "wireplumber": {
-    "format": "VOL {volume}%",
-    "format-muted": "VOL muted",
-    "scroll-step": 5,
-    "tooltip-format": "{node_name}",
-    "on-click": "~/.local/bin/quick-panel volume",
-    "on-click-middle": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
-    "on-click-right": "pavucontrol"
-  },
-  "custom/mouse": {
-    "exec": "~/.local/bin/mouse-battery --watch",
-    "format": "MOUSE {}",
+
+  "custom/start": {
+    "format": "\uf303",
     "tooltip": false,
-    "on-click": "piper"
+    "on-click": "~/.local/bin/quick-panel start"
   },
-  "custom/night": {
-    "exec": "~/.local/bin/nightlight status",
-    "format": "NIGHT {}",
-    "interval": 300,
-    "signal": 9,
-    "tooltip": false,
-    "on-click": "~/.local/bin/quick-panel night",
-    "on-click-middle": "~/.local/bin/nightlight toggle",
-    "on-scroll-up": "~/.local/bin/nightlight stronger",
-    "on-scroll-down": "~/.local/bin/nightlight weaker"
+
+  "wlr/taskbar": {
+    "format": "{icon}",
+    "icon-size": 20,
+    "icon-theme": "Papirus-Dark",
+    "tooltip-format": "{title}",
+    "on-click": "activate",
+    "on-click-middle": "close",
+    "ignore-list": ["scratchpad"]
   },
-  "custom/brightness": {
-    "exec": "brightnessctl -m -c backlight | cut -d, -f4",
-    "format": "BRI {}",
-    "interval": 30,
-    "signal": 8,
-    "tooltip": false,
-    "on-scroll-up": "brightnessctl -q set 5%+ && pkill -RTMIN+8 -x waybar",
-    "on-scroll-down": "brightnessctl -q set 5%- && pkill -RTMIN+8 -x waybar"
+
+  "tray": { "spacing": 8, "icon-size": 16 },
+
+  "group/status": {
+    "orientation": "horizontal",
+    "modules": ["network", "wireplumber", "battery"]
   },
   "network": {
-    "format-wifi": "{icon} {essid}",
-    "format-ethernet": "󰈀 {ipaddr}",
-    "format-disconnected": "󰖪 offline",
-    "format-disabled": "󰖪 off",
+    "format-wifi": "{icon}",
+    "format-ethernet": "󰈀",
+    "format-disconnected": "󰤮",
+    "format-disabled": "󰤮",
     "format-icons": ["󰤟", "󰤢", "󰤥", "󰤨"],
-    "tooltip-format-wifi": "{essid} ({signalStrength}%)\n{ipaddr}/{cidr} on {ifname}",
-    "on-click": "~/.local/bin/quick-panel wifi",
-    "on-click-right": "nm-connection-editor"
+    "tooltip-format-wifi": "{essid} ({signalStrength}%)",
+    "tooltip-format-disconnected": "Not connected",
+    "on-click": "~/.local/bin/quick-panel control"
+  },
+  "wireplumber": {
+    "format": "{icon}",
+    "format-muted": "󰝟",
+    "format-icons": ["󰕿", "󰖀", "󰕾"],
+    "scroll-step": 5,
+    "tooltip-format": "Volume {volume}%",
+    "on-click": "~/.local/bin/quick-panel control",
+    "on-click-middle": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
   },
   "battery": {
     "bat": "BAT0",
     "states": { "warning": 25, "critical": 10 },
-    "format": "BAT {capacity}%",
-    "format-charging": "BAT {capacity}% 󱐋",
-    "format-plugged": "BAT {capacity}% 󰚥",
-    "tooltip-format": "{timeTo}"
+    "format": "{icon}",
+    "format-charging": "󰂄",
+    "format-plugged": "󰚥",
+    "format-icons": ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
+    "tooltip-format": "Battery {capacity}%",
+    "on-click": "~/.local/bin/quick-panel control"
   },
-  "tray": { "spacing": 6 }
+
+  "clock": {
+    "format": "{:%H:%M\n%Y-%m-%d}",
+    "justify": "center",
+    "tooltip": false,
+    "on-click": "~/.local/bin/quick-panel calendar"
+  }
 }

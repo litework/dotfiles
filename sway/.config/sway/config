@@ -34,6 +34,7 @@ exec_always {
     gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
     gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark'
     gsettings set org.gnome.desktop.interface cursor-theme 'capitaine-cursors'
+    gsettings set org.gnome.desktop.interface icon-theme 'Papirus-Dark'
     gsettings set org.gnome.desktop.interface cursor-size 24
     gsettings set org.gnome.desktop.interface monospace-font-name 'Pragmata Pro Mono 11'
 }
@@ -72,7 +73,7 @@ bar {
 
 ### Keys: programs
 bindsym $mod+Return exec $term
-bindsym $mod+space exec $menu
+bindsym $mod+space exec ~/.local/bin/quick-panel start
 bindsym $mod+Escape reload
 bindsym $mod+alt+Escape exec swaynag -t warning -m 'Exit sway?' -B 'Exit' 'swaymsg exit'
 bindsym $mod+shift+Escape exec swaylock -f -C ~/.cache/wallust/swaylock

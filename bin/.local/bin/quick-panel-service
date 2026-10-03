@@ -8,7 +8,9 @@ Network is NetworkManager (nmcli), Bluetooth is BlueZ (bluetoothctl).
 """
 import json
 import os
+import pwd
 import re
+import shlex
 import sys
 import time
 
@@ -25,8 +27,10 @@ gi.require_version("Gtk4LayerShell", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
+# The preload is only for this process; don't leak it into apps we launch.
+os.environ.pop("LD_PRELOAD", None)
+
 APP_ID = "dev.litework.QuickPanel"
-WIDTH = 360
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x01|\x02")
 
 CSS = """
@@ -50,6 +54,16 @@ window.qp-window, window.qp-backdrop { background: none; box-shadow: none; }
 .qp-sub { opacity: 0.65; font-size: 0.85em; }
 .qp-error { color: @error_color; font-size: 0.85em; }
 .qp-footer { margin-top: 8px; }
+.qp-tile-button { min-height: 40px; background: alpha(@window_fg_color, 0.08); }
+.qp-tile-button:hover { background: alpha(@window_fg_color, 0.14); }
+.qp-tile-button.qp-on { background: @accent_bg_color; color: @accent_fg_color; }
+.qp-tile-label { font-size: 0.85em; }
+.qp-app { padding: 8px 4px; border-radius: 8px; }
+.qp-app-label { font-size: 0.85em; font-weight: normal; }
+.qp-app label { font-weight: normal; }
+.qp-heading { font-weight: bold; }
+.qp-user { padding: 4px 8px; border-radius: 8px; }
+.qp-stats { opacity: 0.65; font-size: 0.85em; }
 .qp-prompt { background: alpha(@accent_bg_color, 0.18); border-radius: 8px; padding: 10px; margin: 4px 0; }
 .qp-prompt-text { font-weight: bold; }
 """
@@ -79,6 +93,20 @@ def run(args, callback=None, stdin=None):
 
     proc.communicate_utf8_async(stdin, None, done)
     return proc
+
+
+# Papirus ships a fixed-colour night-light icon that vanishes on tiles; use Adwaita's symbolic one.
+NIGHT_ICON = "/usr/share/icons/Adwaita/symbolic/status/night-light-symbolic.svg"
+
+
+def image(icon, size):
+    """Gtk.Image from an icon name or an absolute path to a (symbolic) SVG."""
+    if icon.startswith("/"):
+        img = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(icon)))
+    else:
+        img = Gtk.Image(icon_name=icon)
+    img.set_pixel_size(size)
+    return img
 
 
 def spawn(args):
@@ -125,7 +153,7 @@ def make_row(key, icon, title, subtitle, actions, active=False, trailing_icon=No
 
     outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     line = Gtk.Box(spacing=12)
-    line.append(Gtk.Image(icon_name=icon, pixel_size=20))
+    line.append(image(icon, 20))
     labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
     t = Gtk.Label(label=title, xalign=0, ellipsize=3)
     labels.append(t)
@@ -175,22 +203,33 @@ class Page(Gtk.Box):
     has_switch = True
     has_list = True
     has_refresh = True
+    has_header = True
+    has_status = True
+    anchor = "right"    # "right" (above the status icons) or "center" (above Start)
+    width = 340
 
     def __init__(self, panel):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.panel = panel
+        self.set_size_request(self.width, -1)
 
         header = Gtk.Box(spacing=8)
-        self.title_label = Gtk.Label(label=self.title, xalign=0, hexpand=True)
+        self.back_button = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back", visible=False)
+        self.back_button.add_css_class("flat")
+        self.back_button.connect("clicked", lambda *_: self.panel.go_back())
+        self.title_label = Gtk.Label(label=self.title or "", xalign=0, hexpand=True)
         self.title_label.add_css_class("qp-title")
         self.switch = Gtk.Switch(valign=Gtk.Align.CENTER)
         self.switch_handler = self.switch.connect("notify::active", self._on_switch)
+        header.append(self.back_button)
         header.append(self.title_label)
         header.append(self.switch)
+        header.set_visible(self.has_header)
         self.append(header)
 
         self.status = Gtk.Label(xalign=0)
         self.status.add_css_class("qp-status")
+        self.status.set_visible(self.has_status)
         self.append(self.status)
 
         self.list = ExpandableList()
@@ -224,6 +263,9 @@ class Page(Gtk.Box):
         for w in widgets:
             self.insert_child_after(w, anchor)
             anchor = w
+
+    def set_back(self, visible):
+        self.back_button.set_visible(visible)
 
     def set_switch(self, active):
         self.switch.handler_block(self.switch_handler)
@@ -663,10 +705,113 @@ class BluetoothPage(Page):
 
 def slider_row(icon, scale, value_label, icon_widget=None):
     row = Gtk.Box(spacing=10, margin_top=6, margin_bottom=6)
-    row.append(icon_widget or Gtk.Image(icon_name=icon, pixel_size=18))
+    row.append(icon_widget or image(icon, 18))
     row.append(scale)
     row.append(value_label)
     return row
+
+
+class ThrottledScale(Gtk.Box):
+    """Icon + 0-100 slider + value; at most one write command in flight, ending on the latest value."""
+
+    minimum = 0
+
+    def __init__(self, icon_widget):
+        super().__init__(spacing=10, margin_top=4, margin_bottom=4)
+        self.target = None
+        self.sending = False
+        self.touched = 0.0      # last time the user moved the slider
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, self.minimum, 100, 1)
+        self.scale.set_hexpand(True)
+        self.scale.set_draw_value(False)
+        self.handler = self.scale.connect("value-changed", self._on_scale)
+        self.value_label = Gtk.Label(width_chars=4, xalign=1)
+        self.append(icon_widget)
+        self.append(self.scale)
+        self.append(self.value_label)
+
+    def show_value(self, value):
+        if time.monotonic() - self.touched > 1.5:   # don't fight a drag in progress
+            self.scale.handler_block(self.handler)
+            self.scale.set_value(value)
+            self.scale.handler_unblock(self.handler)
+            self.value_label.set_label(f"{value}%")
+
+    def _on_scale(self, scale):
+        value = int(scale.get_value())
+        self.touched = time.monotonic()
+        self.value_label.set_label(f"{value}%")
+        self.changed(value)
+        self.target = value
+        if not self.sending:
+            self._send()
+
+    def _send(self):
+        self.sending = True
+        value = self.target
+        run(self.write_cmd(value), lambda *_: self._sent(value))
+
+    def _sent(self, value):
+        self.sending = False
+        if self.target != value:
+            self._send()
+
+    def changed(self, value):
+        pass
+
+
+class VolumeSlider(ThrottledScale):
+    def __init__(self):
+        self.muted = False
+        self.mute_button = Gtk.Button(icon_name="audio-volume-high-symbolic", tooltip_text="Mute")
+        self.mute_button.add_css_class("flat")
+        self.mute_button.connect("clicked", lambda *_: run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
+                                                            lambda *_: self.refresh()))
+        super().__init__(self.mute_button)
+
+    def _icon(self, vol):
+        if self.muted or vol == 0:
+            return "audio-volume-muted-symbolic"
+        return "audio-volume-low-symbolic" if vol < 34 else \
+               "audio-volume-medium-symbolic" if vol < 67 else "audio-volume-high-symbolic"
+
+    def refresh(self):
+        def got(ok, out):
+            m = re.search(r"Volume: ([\d.]+)( \[MUTED\])?", out)
+            if not m:
+                return
+            vol, self.muted = round(float(m.group(1)) * 100), bool(m.group(2))
+            self.show_value(vol)
+            self.mute_button.set_icon_name(self._icon(int(self.scale.get_value())))
+            self.mute_button.set_tooltip_text("Unmute" if self.muted else "Mute")
+        run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], got)
+
+    def changed(self, vol):
+        if self.muted:
+            self.muted = False
+            run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"])
+        self.mute_button.set_icon_name(self._icon(vol))
+
+    def write_cmd(self, vol):
+        return ["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", f"{vol}%"]
+
+
+class BrightnessSlider(ThrottledScale):
+    minimum = 1   # never fully black
+
+    def __init__(self):
+        super().__init__(Gtk.Image(icon_name="display-brightness-symbolic", pixel_size=18, margin_start=8,
+                                   margin_end=8))
+
+    def refresh(self):
+        def got(ok, out):
+            m = re.search(r",(\d+)%,", out)
+            if m:
+                self.show_value(int(m.group(1)))
+        run(["brightnessctl", "-m", "-c", "backlight"], got)
+
+    def write_cmd(self, value):
+        return ["brightnessctl", "-q", "-c", "backlight", "set", f"{value}%"]
 
 
 class VolumePage(Page):
@@ -679,21 +824,8 @@ class VolumePage(Page):
     def __init__(self, panel):
         super().__init__(panel)
         self.timer = None
-        self.target = None
-        self.sending = False
-        self.touched = 0.0      # last time the user moved the slider
-        self.muted = False
-
-        self.mute_button = Gtk.Button(icon_name="audio-volume-high-symbolic", tooltip_text="Mute")
-        self.mute_button.add_css_class("flat")
-        self.mute_button.connect("clicked", lambda *_: run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
-                                                            lambda *_: self.refresh()))
-        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
-        self.scale.set_hexpand(True)
-        self.scale.set_draw_value(False)
-        self.scale_handler = self.scale.connect("value-changed", self._on_scale)
-        self.value_label = Gtk.Label(width_chars=4, xalign=1)
-        self.add_body(slider_row(None, self.scale, self.value_label, self.mute_button))
+        self.slider = VolumeSlider()
+        self.add_body(self.slider)
 
     def opened(self):
         self.refresh()
@@ -704,53 +836,11 @@ class VolumePage(Page):
             GLib.source_remove(self.timer)
             self.timer = None
 
-    def _icon(self, vol):
-        if self.muted or vol == 0:
-            return "audio-volume-muted-symbolic"
-        return "audio-volume-low-symbolic" if vol < 34 else \
-               "audio-volume-medium-symbolic" if vol < 67 else "audio-volume-high-symbolic"
-
     def refresh(self):
-        run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"], self._got_volume)
+        self.slider.refresh()
         run(["pactl", "-f", "json", "list", "sinks"],
             lambda ok, sinks: run(["pactl", "get-default-sink"],
                                   lambda ok2, default: self._render_sinks(sinks, default.strip())))
-
-    def _got_volume(self, ok, out):
-        m = re.search(r"Volume: ([\d.]+)( \[MUTED\])?", out)
-        if not m:
-            return
-        vol, self.muted = round(float(m.group(1)) * 100), bool(m.group(2))
-        if time.monotonic() - self.touched > 1.5:   # don't fight a drag in progress
-            self.scale.handler_block(self.scale_handler)
-            self.scale.set_value(vol)
-            self.scale.handler_unblock(self.scale_handler)
-            self.value_label.set_label(f"{vol}%")
-        self.mute_button.set_icon_name(self._icon(int(self.scale.get_value())))
-        self.mute_button.set_tooltip_text("Unmute" if self.muted else "Mute")
-
-    def _on_scale(self, scale):
-        vol = int(scale.get_value())
-        self.touched = time.monotonic()
-        self.value_label.set_label(f"{vol}%")
-        if self.muted:
-            self.muted = False
-            run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"])
-        self.mute_button.set_icon_name(self._icon(vol))
-        self.target = vol
-        if not self.sending:
-            self._send()
-
-    def _send(self):
-        # At most one wpctl in flight; always finish on the latest value.
-        self.sending = True
-        vol = self.target
-        run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", f"{vol}%"], lambda *_: self._sent(vol))
-
-    def _sent(self, vol):
-        self.sending = False
-        if self.target != vol:
-            self._send()
 
     def _render_sinks(self, out, default):
         try:
@@ -760,10 +850,9 @@ class VolumePage(Page):
         current = next((s.get("description", s["name"]) for s in sinks if s["name"] == default), None)
         self.status.set_label(f"Output: {current}" if current else "No output device")
         self.list.clear()
+        self.scroller.set_visible(len(sinks) > 1)
         if len(sinks) < 2:
-            self.scroller.set_visible(False)
             return
-        self.scroller.set_visible(True)
         self.section("Output device")
         for sink in sinks:
             name = sink["name"]
@@ -808,7 +897,7 @@ class NightPage(Page):
         schedule.append(labels)
         schedule.append(self.schedule_switch)
 
-        self.add_body(strength, slider_row("night-light-symbolic", self.scale, self.value_label), schedule)
+        self.add_body(strength, slider_row(NIGHT_ICON, self.scale, self.value_label), schedule)
 
     def _state(self):
         state = {"enabled": "1", "schedule": "1", "strength": "60"}
@@ -861,6 +950,448 @@ class NightPage(Page):
         self.debounce = None
         self._cmd("strength", str(int(self.scale.get_value())))
         return False
+
+
+def read(path, default=""):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+class Tile(Gtk.Box):
+    """Windows-style quick setting: toggle button (+ optional arrow to a detail page) and a label."""
+
+    def __init__(self, icon, label, on_toggle, on_more=None):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.active = False
+        self.label_text = label
+        self.buttons = Gtk.Box()
+        self.buttons.add_css_class("linked")
+        toggle = Gtk.Button(hexpand=True, child=image(icon, 18))
+        toggle.add_css_class("qp-tile-button")
+        toggle.connect("clicked", lambda *_: on_toggle(not self.active))
+        self.buttons.append(toggle)
+        if on_more:
+            more = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="More")
+            more.add_css_class("qp-tile-button")
+            more.connect("clicked", lambda *_: on_more())
+            self.buttons.append(more)
+        self.label = Gtk.Label(label=label, ellipsize=3, max_width_chars=12)
+        self.label.add_css_class("qp-tile-label")
+        self.append(self.buttons)
+        self.append(self.label)
+
+    def set_state(self, active, label=None):
+        self.active = active
+        child = self.buttons.get_first_child()
+        while child:
+            (child.add_css_class if active else child.remove_css_class)("qp-on")
+            child = child.get_next_sibling()
+        self.label.set_label(label or self.label_text)
+
+
+class ControlPage(Page):
+    """Quick settings: tiles, brightness and volume, battery and system stats."""
+    has_header = False
+    has_status = False
+    has_switch = False
+    has_list = False
+    has_refresh = False
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.timer = None
+        self.cpu_prev = None
+        nav = self.panel.navigate
+
+        self.wifi = Tile("network-wireless-symbolic", "Wi-Fi",
+                         lambda on: run(["nmcli", "radio", "wifi", "on" if on else "off"], lambda *_: self.refresh()),
+                         lambda: nav("wifi"))
+        self.bt = Tile("bluetooth-active-symbolic", "Bluetooth",
+                       lambda on: run(["bluetoothctl", "power", "on" if on else "off"], lambda *_: self.refresh()),
+                       lambda: nav("bluetooth"))
+        self.night = Tile(NIGHT_ICON, "Night light",
+                          lambda on: run([NIGHTLIGHT, "on" if on else "off"], lambda *_: self.refresh()),
+                          lambda: nav("night"))
+        self.dnd = Tile("notifications-disabled-symbolic", "Do not disturb",
+                        lambda on: run(["makoctl", "mode", "-a" if on else "-r", "do-not-disturb"],
+                                       lambda *_: self.refresh()))
+        grid = Gtk.Grid(column_spacing=8, row_spacing=10, column_homogeneous=True, margin_bottom=6)
+        grid.attach(self.wifi, 0, 0, 1, 1)
+        grid.attach(self.bt, 1, 0, 1, 1)
+        grid.attach(self.night, 2, 0, 1, 1)
+        grid.attach(self.dnd, 0, 1, 1, 1)
+
+        self.brightness = BrightnessSlider()
+        self.volume = VolumeSlider()
+        more = Gtk.Button(icon_name="go-next-symbolic", tooltip_text="Output devices")
+        more.add_css_class("flat")
+        more.connect("clicked", lambda *_: nav("volume"))
+        self.volume.append(more)
+
+        footer = Gtk.Box(spacing=8, margin_top=4)
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
+        self.battery_label = Gtk.Label(xalign=0)
+        self.stats_label = Gtk.Label(xalign=0)
+        self.stats_label.add_css_class("qp-stats")
+        info.append(self.battery_label)
+        info.append(self.stats_label)
+        gear = Gtk.Button(icon_name="emblem-system-symbolic", tooltip_text="Settings", valign=Gtk.Align.CENTER)
+        gear.add_css_class("flat")
+        gear.connect("clicked", lambda *_: nav("settings"))
+        footer.append(info)
+        footer.append(gear)
+
+        self.add_body(grid, self.brightness, self.volume, Gtk.Separator(margin_top=4), footer)
+
+    def opened(self):
+        self.refresh()
+        self.timer = GLib.timeout_add(2000, lambda: (self.refresh(), True)[1])
+
+    def closed(self):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = None
+
+    def refresh(self):
+        def wifi(ok, radio):
+            if radio.strip() != "enabled":
+                return self.wifi.set_state(False)
+            run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show", "--active"],
+                lambda ok, out: self.wifi.set_state(True, next(
+                    (l.rsplit(":", 1)[0].replace("\\:", ":") for l in out.splitlines()
+                     if l.endswith(":802-11-wireless")), "Wi-Fi")))
+        run(["nmcli", "radio", "wifi"], wifi)
+
+        def bt(ok, show):
+            if "Powered: yes" not in show:
+                return self.bt.set_state(False)
+            run(["bluetoothctl", "devices", "Connected"],
+                lambda ok, out: self.bt.set_state(True, next(
+                    (l.split(" ", 2)[2] for l in out.splitlines() if l.startswith("Device ")), "Bluetooth")))
+        run(["bluetoothctl", "show"], bt)
+
+        state = dict(l.partition("=")[::2] for l in read(NIGHT_STATE).splitlines() if "=" in l)
+        self.night.set_state(state.get("enabled", "1") == "1")
+        run(["makoctl", "mode"], lambda ok, out: self.dnd.set_state("do-not-disturb" in out.split()))
+
+        self.brightness.refresh()
+        self.volume.refresh()
+
+        bat = "/sys/class/power_supply/BAT0"
+        text = f"Battery {read(bat + '/capacity', '?')}%"
+        status = read(bat + "/status")
+        if status in ("Charging", "Full", "Not charging"):
+            text += " · plugged in" if status != "Charging" else " · charging"
+        for dev in sorted(os.listdir("/sys/class/power_supply")):
+            if dev.startswith("hidpp_battery"):
+                text += f"   Mouse {read(f'/sys/class/power_supply/{dev}/capacity', '?')}%"
+                break
+        self.battery_label.set_label(text)
+
+        fields = [int(x) for x in read("/proc/stat").splitlines()[0].split()[1:]]
+        idle, total = fields[3] + fields[4], sum(fields)
+        cpu = 0
+        if self.cpu_prev:
+            d_total, d_idle = total - self.cpu_prev[1], idle - self.cpu_prev[0]
+            cpu = round(100 * (d_total - d_idle) / d_total) if d_total else 0
+        self.cpu_prev = (idle, total)
+        mem = {l.split(":")[0]: int(l.split()[1]) for l in read("/proc/meminfo").splitlines()[:5]}
+        ram = round(100 * (1 - mem["MemAvailable"] / mem["MemTotal"]))
+        self.stats_label.set_label(f"CPU {cpu}%  ·  RAM {ram}%")
+
+
+PINNED_FILE = os.path.expanduser("~/.config/quick-panel/pinned")
+
+
+class StartPage(Page):
+    """Start menu: search, pinned apps, all apps, settings and power."""
+    has_header = False
+    has_status = False
+    has_switch = False
+    has_list = False
+    has_refresh = False
+    anchor = "center"
+    width = 520
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.apps = []
+        self.results = []
+
+        self.search = Gtk.SearchEntry(placeholder_text="Search for apps", margin_bottom=8)
+        self.search.connect("search-changed", self._on_search)
+        self.search.connect("activate", lambda *_: self.results and self.launch(self.results[0]))
+
+        self.views = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, vhomogeneous=False)
+
+        pinned = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        head = Gtk.Box()
+        title = Gtk.Label(label="Pinned", xalign=0, hexpand=True)
+        title.add_css_class("qp-heading")
+        all_button = Gtk.Button(label="All apps  ›")
+        all_button.add_css_class("flat")
+        all_button.connect("clicked", lambda *_: self.views.set_visible_child_name("all"))
+        head.append(title)
+        head.append(all_button)
+        self.grid = Gtk.FlowBox(min_children_per_line=6, max_children_per_line=6, homogeneous=True,
+                                selection_mode=Gtk.SelectionMode.NONE, row_spacing=4, column_spacing=4,
+                                valign=Gtk.Align.START)
+        grid_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=250,
+                                         max_content_height=250, propagate_natural_height=True)
+        grid_scroll.set_child(self.grid)
+        pinned.append(head)
+        pinned.append(grid_scroll)
+
+        everything = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        head = Gtk.Box()
+        title = Gtk.Label(label="All apps", xalign=0, hexpand=True)
+        title.add_css_class("qp-heading")
+        back = Gtk.Button(label="‹  Back")
+        back.add_css_class("flat")
+        back.connect("clicked", lambda *_: self.views.set_visible_child_name("pinned"))
+        head.append(title)
+        head.append(back)
+        self.all_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        all_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=250,
+                                        max_content_height=250)
+        all_scroll.set_child(self.all_list)
+        everything.append(head)
+        everything.append(all_scroll)
+
+        self.result_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        result_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=286,
+                                           max_content_height=286)
+        result_scroll.set_child(self.result_list)
+
+        self.views.add_named(pinned, "pinned")
+        self.views.add_named(everything, "all")
+        self.views.add_named(result_scroll, "search")
+
+        bottom = Gtk.Box(spacing=6, margin_top=6)
+        user = Gtk.Box(spacing=8, hexpand=True)
+        user.add_css_class("qp-user")
+        user.append(Gtk.Image(icon_name="avatar-default-symbolic", pixel_size=22))
+        name = pwd.getpwuid(os.getuid())
+        user.append(Gtk.Label(label=(name.pw_gecos.split(",")[0] or name.pw_name), xalign=0))
+        gear = Gtk.Button(icon_name="emblem-system-symbolic", tooltip_text="Settings")
+        gear.add_css_class("flat")
+        gear.connect("clicked", lambda *_: self.panel.navigate("settings"))
+        power = Gtk.MenuButton(icon_name="system-shutdown-symbolic", tooltip_text="Power",
+                               direction=Gtk.ArrowType.UP)
+        power.add_css_class("flat")
+        menu = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        lock = ["swaylock", "-f", "-C", os.path.expanduser("~/.cache/wallust/swaylock")]
+        for label, icon, cmd in (("Lock", "system-lock-screen-symbolic", lock),
+                                 ("Sleep", "weather-clear-night-symbolic", ["systemctl", "suspend"]),
+                                 ("Sign out", "system-log-out-symbolic", ["swaymsg", "exit"]),
+                                 ("Restart", "system-reboot-symbolic", ["systemctl", "reboot"]),
+                                 ("Shut down", "system-shutdown-symbolic", ["systemctl", "poweroff"])):
+            item = Gtk.Button()
+            row = Gtk.Box(spacing=10)
+            row.append(Gtk.Image(icon_name=icon))
+            row.append(Gtk.Label(label=label, xalign=0))
+            item.set_child(row)
+            item.add_css_class("flat")
+            item.connect("clicked", lambda _b, c=cmd: (power.popdown(), self.panel.hide_panel(), spawn(c)))
+            menu.append(item)
+        popover = Gtk.Popover(child=menu)
+        power.set_popover(popover)
+        bottom.append(user)
+        bottom.append(gear)
+        bottom.append(power)
+
+        self.add_body(self.search, self.views, Gtk.Separator(margin_top=6), bottom)
+
+    # Apps --------------------------------------------------------------
+    def _pinned_ids(self):
+        return [l.strip() for l in read(PINNED_FILE).splitlines() if l.strip() and not l.startswith("#")]
+
+    def _set_pinned(self, ids):
+        os.makedirs(os.path.dirname(PINNED_FILE), exist_ok=True)
+        with open(PINNED_FILE, "w") as f:
+            f.write("\n".join(ids) + "\n")
+        self._build()
+
+    def _build(self):
+        seen, apps = set(), []
+        for app in Gio.AppInfo.get_all():
+            if app.should_show() and app.get_id() not in seen:
+                seen.add(app.get_id())
+                apps.append(app)
+        self.apps = sorted(apps, key=lambda a: a.get_display_name().lower())
+        by_id = {a.get_id(): a for a in self.apps}
+
+        self.grid.remove_all()
+        for app_id in self._pinned_ids():
+            if app_id in by_id:
+                self.grid.append(self._app_button(by_id[app_id], tile=True))
+        while (child := self.all_list.get_first_child()) is not None:
+            self.all_list.remove(child)
+        for app in self.apps:
+            self.all_list.append(self._app_button(app))
+
+    def _app_button(self, app, tile=False):
+        b = Gtk.Button(tooltip_text=app.get_description() or app.get_display_name())
+        b.add_css_class("flat")
+        b.add_css_class("qp-app")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL if tile else Gtk.Orientation.HORIZONTAL,
+                      spacing=6 if tile else 12)
+        icon = app.get_icon()
+        image = Gtk.Image.new_from_gicon(icon) if icon else Gtk.Image(icon_name="application-x-executable")
+        image.set_pixel_size(32 if tile else 24)
+        label = Gtk.Label(label=app.get_display_name(), ellipsize=3, max_width_chars=10 if tile else 50,
+                          xalign=0.5 if tile else 0)
+        if tile:
+            label.add_css_class("qp-app-label")
+        box.append(image)
+        box.append(label)
+        b.set_child(box)
+        b.connect("clicked", lambda *_: self.launch(app))
+        right = Gtk.GestureClick(button=3)
+        right.connect("pressed", lambda *_: self._pin_menu(b, app))
+        b.add_controller(right)
+        return b
+
+    def _pin_menu(self, widget, app):
+        ids = self._pinned_ids()
+        pinned = app.get_id() in ids
+        item = Gtk.Button(label="Unpin from Start" if pinned else "Pin to Start")
+        item.add_css_class("flat")
+        popover = Gtk.Popover(child=item)
+        popover.set_parent(widget)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+
+        def toggle(*_):
+            popover.popdown()
+            self._set_pinned([i for i in ids if i != app.get_id()] if pinned else ids + [app.get_id()])
+        item.connect("clicked", toggle)
+        popover.popup()
+
+    def launch(self, app):
+        self.panel.hide_panel()
+        if isinstance(app, Gio.DesktopAppInfo) and app.get_boolean("Terminal"):
+            cmd = re.sub(r"%[a-zA-Z]", "", app.get_commandline() or "")
+            spawn(["foot", *shlex.split(cmd)])
+            return
+        ctx = Gdk.Display.get_default().get_app_launch_context()
+        ctx.unsetenv("LD_PRELOAD")
+        try:
+            app.launch([], ctx)
+        except GLib.Error as e:
+            spawn(["notify-send", "Couldn't start " + app.get_display_name(), e.message])
+
+    # Search ------------------------------------------------------------
+    def _on_search(self, entry):
+        q = entry.get_text().strip().lower()
+        while (child := self.result_list.get_first_child()) is not None:
+            self.result_list.remove(child)
+        if not q:
+            self.results = []
+            self.views.set_visible_child_name("pinned")
+            return
+        scored = []
+        for app in self.apps:
+            name = app.get_display_name().lower()
+            extra = []
+            if isinstance(app, Gio.DesktopAppInfo):
+                extra = [app.get_generic_name() or "", " ".join(app.get_keywords() or [])]
+            hay = " ".join([name, *extra, app.get_executable() or ""]).lower()
+            if name.startswith(q):
+                rank = 0
+            elif any(w.startswith(q) for w in name.split()):
+                rank = 1
+            elif q in hay:
+                rank = 2
+            else:
+                continue
+            scored.append((rank, name, app))
+        scored.sort(key=lambda t: t[:2])
+        self.results = [a for _, _, a in scored[:12]]
+        for app in self.results:
+            self.result_list.append(self._app_button(app))
+        if not self.results:
+            none = Gtk.Label(label="No apps found", margin_top=20)
+            none.add_css_class("qp-sub")
+            self.result_list.append(none)
+        self.views.set_visible_child_name("search")
+
+    def opened(self):
+        self._build()
+        self.search.set_text("")
+        self.views.set_visible_child_name("pinned")
+        GLib.idle_add(self.search.grab_focus)
+
+
+class SettingsPage(Page):
+    title = "Settings"
+    has_switch = False
+    has_refresh = False
+    has_status = False
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        nav = self.panel.navigate
+
+        def external(cmd):
+            return lambda: (self.panel.hide_panel(), spawn(cmd))
+
+        for icon, title, sub, action in (
+            ("network-wireless-symbolic", "Network & internet", "Wi-Fi and connections", lambda: nav("wifi")),
+            ("bluetooth-active-symbolic", "Bluetooth & devices", "Pair and connect devices", lambda: nav("bluetooth")),
+            ("audio-volume-high-symbolic", "Sound", "Volume and output device", lambda: nav("volume")),
+            (NIGHT_ICON, "Night light", "Warmer colours in the evening", lambda: nav("night")),
+            ("preferences-desktop-wallpaper-symbolic", "Personalization", "Change wallpaper and colours",
+             self.pick_wallpaper),
+            ("input-mouse-symbolic", "Mouse", "Buttons, DPI and lighting", external(["piper"])),
+            ("preferences-system-network-symbolic", "Advanced network settings", "VPN, static IP, saved networks",
+             external(["nm-connection-editor"])),
+            ("computer-symbolic", "About this PC", "System information",
+             external(["foot", "--hold", "fastfetch"])),
+        ):
+            row = make_row(title, icon, title, sub, Gtk.Box())
+            row.qp_on_activate = action
+            self.list.append(row)
+
+    def pick_wallpaper(self):
+        self.panel.hide_panel()
+        images = Gtk.FileFilter(name="Images")
+        images.add_mime_type("image/*")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(images)
+        dialog = Gtk.FileDialog(title="Choose a wallpaper", filters=filters, modal=True)
+        pictures = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES)
+        if pictures:
+            dialog.set_initial_folder(Gio.File.new_for_path(pictures))
+
+        def chosen(d, res):
+            try:
+                path = d.open_finish(res).get_path()
+            except GLib.Error:
+                return
+            spawn(["notify-send", "-a", "Settings", "Applying wallpaper…", "Colours will update in a few seconds."])
+            spawn([os.path.expanduser("~/.local/bin/wallpaper"), path])
+
+        dialog.open(None, None, chosen)
+
+
+class CalendarPage(Page):
+    has_switch = False
+    has_list = False
+    has_refresh = False
+
+    def __init__(self, panel):
+        super().__init__(panel)
+        self.calendar = Gtk.Calendar()
+        self.add_body(self.calendar)
+
+    def opened(self):
+        now = GLib.DateTime.new_now_local()
+        self.title_label.set_label(now.format("%A"))
+        self.status.set_label(now.format("%B %-d, %Y"))
+        (self.calendar.set_date if hasattr(self.calendar, "set_date") else self.calendar.select_day)(now)
 
 
 AGENT_PATH = "/dev/litework/QuickPanel/agent"
@@ -992,7 +1523,7 @@ class QuickPanel(Adw.Application):
         click.connect("pressed", lambda *_: self.hide_panel())
         self.backdrop.add_controller(click)
 
-        self.window = Gtk.Window(application=self, decorated=False, default_width=WIDTH)
+        self.window = Gtk.Window(application=self, decorated=False)
         self.window.set_css_classes(["qp-window"])  # drop the default opaque background
         LayerShell.init_for_window(self.window)
         LayerShell.set_namespace(self.window, "quick-panel")
@@ -1005,11 +1536,14 @@ class QuickPanel(Adw.Application):
         keys.connect("key-pressed", lambda _c, kv, *_: (self.hide_panel(), True)[1] if kv == Gdk.KEY_Escape else False)
         self.window.add_controller(keys)
 
-        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        self.root = None
+        self.history = []
+        self.stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
         self.stack.add_css_class("qp-panel")
-        self.stack.set_size_request(WIDTH - 20, -1)
         self.pages = {"wifi": WifiPage(self), "bluetooth": BluetoothPage(self),
-                      "volume": VolumePage(self), "night": NightPage(self)}
+                      "volume": VolumePage(self), "night": NightPage(self),
+                      "control": ControlPage(self), "start": StartPage(self),
+                      "settings": SettingsPage(self), "calendar": CalendarPage(self)}
         for name, page in self.pages.items():
             self.stack.add_named(page, name)
         self.window.set_child(self.stack)
@@ -1019,6 +1553,11 @@ class QuickPanel(Adw.Application):
         toggle = Gio.SimpleAction.new("toggle", GLib.VariantType.new("s"))
         toggle.connect("activate", lambda _a, mode: self.toggle(mode.get_string()))
         self.add_action(toggle)
+        # Open a detail page inside the visible panel (with back button); handy for scripts.
+        navigate = Gio.SimpleAction.new("navigate", GLib.VariantType.new("s"))
+        navigate.connect("activate", lambda _a, mode: self.window.get_visible() and mode.get_string() in self.pages
+                         and self.navigate(mode.get_string()))
+        self.add_action(navigate)
 
     def do_command_line(self, cmdline):
         args = cmdline.get_arguments()[1:]
@@ -1028,32 +1567,59 @@ class QuickPanel(Adw.Application):
         elif mode in ("--daemon", None):
             pass
         else:
-            cmdline.printerr("usage: quick-panel-service [wifi|bluetooth|volume|night|--daemon]\n")
+            cmdline.printerr("usage: quick-panel-service [start|control|calendar|settings|wifi|bluetooth|volume|night|--daemon]\n")
             return 2
         return 0
 
     def toggle(self, mode):
+        """Bar click: open `mode` as the root page, or close if it is already open."""
         if mode not in self.pages:
             return
-        if self.window.get_visible() and self.current == mode:
+        if self.window.get_visible() and self.root == mode:
             self.hide_panel()
-            return
-        if self.current and self.current != mode:
-            self.pages[self.current].closed()
-        self.current = mode
-        self.stack.set_visible_child_name(mode)
-        self.pages[mode].opened()
-        self.backdrop.present()
-        self.window.present()
+        else:
+            self.open_root(mode)
+
+    def open_root(self, mode):
+        if self.window.get_visible() and self.pages[self.root].anchor != self.pages[mode].anchor:
+            self.hide_panel()   # re-map so the surface moves and resizes cleanly
+        self.root = mode
+        self.history = []
+        self._show_page(mode)
+
+    def navigate(self, mode):
+        """Open a detail page from inside the panel, with a back button."""
+        if self.current:
+            self.history.append(self.current)
+        self._show_page(mode)
+
+    def go_back(self):
+        if self.history:
+            self._show_page(self.history.pop())
 
     def show(self, mode):
         if not (self.window.get_visible() and self.current == mode):
-            self.toggle(mode)
+            self.open_root(mode)
+
+    def _show_page(self, mode):
+        if self.current and self.current != mode:
+            self.pages[self.current].closed()
+        self.current = mode
+        page = self.pages[mode]
+        page.set_back(bool(self.history))
+        self.stack.set_visible_child_name(mode)
+        page.opened()
+        LayerShell.set_anchor(self.window, LayerShell.Edge.RIGHT, self.pages[self.root].anchor == "right")
+        self.window.set_default_size(-1, -1)
+        self.backdrop.present()
+        self.window.present()
 
     def hide_panel(self):
         if self.current:
             self.pages[self.current].closed()
         self.current = None
+        self.root = None
+        self.history = []
         self.window.set_visible(False)
         self.backdrop.set_visible(False)
 

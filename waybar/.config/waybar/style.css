@@ -1,4 +1,4 @@
-/* ~/.config/waybar/style.css — colors from wallust */
+/* ~/.config/waybar/style.css — Windows 11-style taskbar; colors from wallust */
 @import "colors.css"; /* written by wallust */
 
 * {
@@ -14,25 +14,41 @@ window#waybar {
   color: @foreground;
 }
 
-#workspaces button {
-  padding: 0 6px;
-  color: @color8;
+/* Rounded hover highlight on every clickable item, like Windows 11 */
+#workspaces button,
+#custom-start,
+#taskbar button,
+#status,
+#clock {
+  margin: 3px 1px;
+  border-radius: 6px;
   background: transparent;
 }
-#workspaces button.focused { color: @foreground; box-shadow: inset 0 -2px @color7; }
-#workspaces button.urgent  { color: @color1; }
-
-#mode { color: @color0; background: @color7; padding: 0 6px; }
-
-#custom-power, #mpd, #clock, #cpu, #memory, #bluetooth, #wireplumber,
-#custom-brightness, #custom-night, #custom-mouse, #network, #battery, #tray {
-  padding: 0 6px;
+#workspaces button:hover,
+#custom-start:hover,
+#taskbar button:hover,
+#status:hover,
+#clock:hover {
+  background: alpha(@foreground, 0.12);
 }
-#custom-power { color: @color7; }
-#network, #bluetooth { padding: 0 8px; }
-#bluetooth { font-size: 16px; color: @foreground; }
-#network:hover, #bluetooth:hover { background: alpha(@foreground, 0.12); }
-#bluetooth.off, #bluetooth.disabled { color: @color8; }
-#wireplumber.muted, #network.disconnected { color: @color8; }
-#battery.warning  { color: @color3; }
+
+#workspaces { margin-left: 4px; }
+#workspaces button { padding: 0 8px; color: @color8; }
+#workspaces button.focused { color: @foreground; background: alpha(@foreground, 0.10); }
+#workspaces button.urgent { color: @color1; }
+#mode { color: @color0; background: @color7; padding: 0 8px; margin: 3px 2px; border-radius: 6px; }
+
+#custom-start { font-family: "JetBrainsMono Nerd Font"; font-size: 18px; padding: 0 12px; color: @color4; }
+
+#taskbar button { padding: 0 8px; border-bottom: 2px solid transparent; }
+#taskbar button.active { background: alpha(@foreground, 0.10); border-bottom: 2px solid @color4; }
+
+#tray { padding: 0 8px; }
+
+#status { padding: 0 6px; }
+#network, #wireplumber, #battery { font-size: 15px; padding: 0 5px; }
+#network.disconnected, #network.disabled, #wireplumber.muted { color: @color8; }
+#battery.warning { color: @color3; }
 #battery.critical { color: @color1; }
+
+#clock { padding: 0 10px; margin-right: 6px; font-size: 11px; }
