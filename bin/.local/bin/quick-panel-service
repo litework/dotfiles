@@ -55,6 +55,7 @@ window.qp-window, window.qp-backdrop { background: none; box-shadow: none; }
   padding: 14px;
 }
 .qp-backdrop { background: transparent; }
+.qp-backdrop-fill { background-color: rgba(0, 0, 0, 0.01); }
 .qp-title { font-weight: bold; font-size: 1.15em; }
 .qp-clock { font-size: 2.2em; font-weight: 300; font-feature-settings: "tnum"; }
 .qp-status { opacity: 0.7; font-size: 0.9em; }
@@ -2307,6 +2308,9 @@ class QuickPanel(Adw.Application):
         LayerShell.set_exclusive_zone(self.backdrop, -1)
         for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
             LayerShell.set_anchor(self.backdrop, edge, True)
+        # GTK never draws a window with no content, and an undrawn surface gets no clicks,
+        # so fill it with a practically invisible box.
+        self.backdrop.set_child(Gtk.Box(hexpand=True, vexpand=True, css_classes=["qp-backdrop-fill"]))
         click = Gtk.GestureClick()
         click.connect("pressed", lambda *_: self.hide_panel())
         self.backdrop.add_controller(click)
