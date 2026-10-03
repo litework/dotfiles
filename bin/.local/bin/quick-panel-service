@@ -914,7 +914,7 @@ class NightPage(Page):
         schedule = Gtk.Box(spacing=8, margin_top=6)
         labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
         labels.append(Gtk.Label(label="Follow the sun", xalign=0))
-        sub = Gtk.Label(label="Fades in at sunset and out at sunrise (Toronto)", xalign=0, wrap=True,
+        sub = Gtk.Label(label="Fades in at sunset and out at sunrise (Markham)", xalign=0, wrap=True,
                         max_width_chars=30)
         sub.add_css_class("qp-sub")
         labels.append(sub)
@@ -1199,7 +1199,7 @@ class AppearancePage(Page):
 
     def opened(self):
         run([APPEARANCE, "sun"], lambda ok, out: self.sun_label.set_label(
-            "Light from sunrise to sunset in Toronto (today " + out.strip().replace("sunrise ", "").replace(", sunset ", "–") + ")"))
+            "Light from sunrise to sunset in Markham (today " + out.strip().replace("sunrise ", "").replace(", sunset ", "–") + ")"))
         self.refresh()
 
     def refresh(self):

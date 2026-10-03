@@ -6,7 +6,7 @@
 #   nightlight strength 0-100         how warm (0 = none, 100 = 2500K)
 #   nightlight stronger|weaker        strength ±5 (bar scroll)
 #   nightlight status                 text for the waybar module
-# Location is Toronto at city precision, from the system timezone.
+# Location is Markham, Ontario, at city precision.
 set -u
 
 dir="${XDG_STATE_HOME:-$HOME/.local/state}/nightlight"
@@ -27,7 +27,7 @@ apply() {
     temp=$((6500 - strength * 40))
     if [ "$schedule" = 1 ]; then high=6500; else high=$((temp + 1)); fi  # high≈low: same warmth day and night
     [ "$high" -gt "$temp" ] || high=$((temp + 1))
-    setsid -f wlsunset -l 43.7 -L -79.4 -t "$temp" -T "$high" >/dev/null 2>&1
+    setsid -f wlsunset -l 43.9 -L -79.3 -t "$temp" -T "$high" >/dev/null 2>&1
 }
 
 clamp() { [ "$1" -lt 0 ] && echo 0 && return; [ "$1" -gt 100 ] && echo 100 && return; echo "$1"; }

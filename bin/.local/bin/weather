@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""weather — Toronto weather from Open-Meteo (no account; city-level coordinates only).
+"""weather — Markham, Ontario weather from Open-Meteo (no account; city-level coordinates only).
 
   weather bar      JSON for the waybar module (icon class + temperature)
   weather json     the cached forecast for quick-panel (refreshing it if stale)
@@ -13,7 +13,7 @@ import sys
 import time
 import urllib.request
 
-LAT, LON, PLACE = 43.7, -79.4, "Toronto"
+LAT, LON, PLACE = 43.9, -79.3, "Markham"
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "weather.json")
 MAX_AGE = 15 * 60
 URL = ("https://api.open-meteo.com/v1/forecast"
