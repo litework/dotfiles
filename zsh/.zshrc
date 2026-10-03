@@ -27,6 +27,7 @@ alias ll='eza -l --git --group-directories-first'
 alias la='eza -la --git --group-directories-first'
 alias tree='eza --tree'
 alias vim=nvim
+alias neofetch=fastfetch
 
 source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
 # Must be sourced last.
