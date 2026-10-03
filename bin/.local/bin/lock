@@ -1,0 +1,4 @@
+#!/bin/sh
+# lock — Windows-style lock screen (gtklock); falls back to swaylock if gtklock can't start.
+pgrep -x gtklock >/dev/null && exit 0
+gtklock -d || swaylock -f -C "$HOME/.cache/wallust/swaylock"

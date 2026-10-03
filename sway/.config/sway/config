@@ -50,10 +50,10 @@ input type:touchpad {
 
 ### Idle / lock
 exec swayidle -w \
-    timeout 600  'swaylock -f -C ~/.cache/wallust/swaylock' \
+    timeout 600  '~/.local/bin/lock' \
     timeout 900  'swaymsg "output * power off"' \
           resume 'swaymsg "output * power on"' \
-    before-sleep 'swaylock -f -C ~/.cache/wallust/swaylock'
+    before-sleep '~/.local/bin/lock'
 
 ### Autostart
 exec foot --server
@@ -76,7 +76,7 @@ bindsym $mod+Return exec $term
 bindsym $mod+space exec ~/.local/bin/quick-panel start
 bindsym $mod+Escape reload
 bindsym $mod+alt+Escape exec swaynag -t warning -m 'Exit sway?' -B 'Exit' 'swaymsg exit'
-bindsym $mod+shift+Escape exec swaylock -f -C ~/.cache/wallust/swaylock
+bindsym $mod+shift+Escape exec ~/.local/bin/lock
 bindsym $mod+x exec ~/.local/bin/powermenu
 bindsym $mod+v exec ~/.local/bin/quick-panel clipboard
 

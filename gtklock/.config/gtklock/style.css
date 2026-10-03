@@ -1,0 +1,52 @@
+/* ~/.config/gtklock/style.css — Windows-style lock screen */
+window {
+  background-size: cover;
+  background-position: center;
+  font-family: "Adwaita Sans";
+  color: white;
+}
+
+/* Dim the wallpaper a little so text stays readable */
+#window-box {
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 60px 0;
+}
+
+#clock-label {
+  font-size: 104px;
+  font-weight: 300;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+#date-label {
+  font-size: 24px;
+  margin-bottom: 40px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+
+#user-image { margin-top: 20px; }
+#user-name { font-size: 22px; margin: 8px 0 14px; }
+
+#input-field {
+  min-width: 280px;
+  min-height: 36px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background-color: rgba(0, 0, 0, 0.35);
+  color: white;
+}
+
+#unlock-button {
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+#error-label { color: #ff9b9b; }
+
+#powerbar-box button {
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: white;
+  margin: 0 4px;
+}

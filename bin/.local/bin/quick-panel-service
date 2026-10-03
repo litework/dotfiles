@@ -1478,7 +1478,7 @@ class StartPage(Page):
                                direction=Gtk.ArrowType.UP)
         power.add_css_class("flat")
         menu = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        lock = ["swaylock", "-f", "-C", os.path.expanduser("~/.cache/wallust/swaylock")]
+        lock = [os.path.expanduser("~/.local/bin/lock")]
         for label, icon, cmd in (("Lock", "system-lock-screen-symbolic", lock),
                                  ("Sleep", "weather-clear-night-symbolic", ["systemctl", "suspend"]),
                                  ("Sign out", "system-log-out-symbolic", ["swaymsg", "exit"]),

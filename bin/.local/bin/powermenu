@@ -3,7 +3,7 @@
 choice="$(printf 'Lock\nLogout\nSuspend\nReboot\nShutdown\n' | fuzzel --dmenu --prompt 'power> ' --lines 5)" || exit 0
 
 case "$choice" in
-    Lock)     swaylock -f -C "$HOME/.cache/wallust/swaylock" ;;
+    Lock)     "$HOME/.local/bin/lock" ;;
     Logout)   swaymsg exit ;;
     Suspend)  systemctl suspend ;;
     Reboot)   systemctl reboot ;;
