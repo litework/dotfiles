@@ -81,7 +81,7 @@ bindsym $mod+v exec cliphist list | fuzzel --dmenu --prompt 'clipboard> ' --widt
 
 bindsym $mod+F1 [app_id="scratchpad"] scratchpad show
 bindsym $mod+F2 exec $term --app-id=yazi yazi
-bindsym $mod+F3 exec thunar
+bindsym $mod+F3 exec env GDK_BACKEND=x11 thunar
 bindsym $mod+F4 exec microsoft-edge-stable
 bindsym $mod+F5 exec $term --app-id=ncmpcpp ncmpcpp
 bindsym $mod+F6 exec spotify
