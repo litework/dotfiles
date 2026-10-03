@@ -1,0 +1,12 @@
+#!/bin/sh
+# mouse-battery — battery of a wireless Logitech (HID++) mouse for waybar.
+# Prints nothing (module hidden) when no such device is connected.
+for dev in /sys/class/power_supply/hidpp_battery_*; do
+    [ -r "$dev/capacity" ] || continue
+    capacity=$(cat "$dev/capacity")
+    case "$(cat "$dev/status" 2>/dev/null)" in
+        Charging) printf '%s%% 󱐋\n' "$capacity" ;;
+        *) printf '%s%%\n' "$capacity" ;;
+    esac
+    exit 0
+done
