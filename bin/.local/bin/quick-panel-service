@@ -1096,11 +1096,11 @@ class ControlPage(Page):
         grid.attach(self.wifi, 0, 0, 1, 1)
         grid.attach(self.bt, 1, 0, 1, 1)
         grid.attach(self.night, 2, 0, 1, 1)
-        grid.attach(self.dnd, 0, 1, 1, 1)
+        grid.attach(self.dnd, 1, 1, 1, 1)
         self.theme = Tile("preferences-desktop-appearance-symbolic", "Dark mode",
                           lambda on: run([APPEARANCE, "dark" if on else "light"], lambda *_: self.refresh()),
                           lambda: nav("appearance"))
-        grid.attach(self.theme, 1, 1, 1, 1)
+        grid.attach(self.theme, 0, 1, 1, 1)
 
         self.brightness = BrightnessSlider()
         self.volume = VolumeSlider()
