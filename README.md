@@ -16,7 +16,7 @@ The previous bspwm/X11 setup lives in [litework/dotfiles-archive](https://github
 | Files        | `yazi`                                    | `ranger`                 |
 | Music        | `mpd` + `ncmpcpp`                         | —                        |
 | Network      | NetworkManager                             | dhcpcd + wpa_supplicant  |
-| Quick settings | `quick-panel`: Wi-Fi / Bluetooth flyouts (GTK4 + layer-shell), click the bar | — |
+| Quick settings | `quick-panel`: Wi-Fi / Bluetooth flyouts + Bluetooth pairing agent (GTK4 + layer-shell), click the bar | blueman |
 | Audio        | PipeWire (`wireplumber`, `wpctl`)          | PulseAudio               |
 | Screenshots  | `grim` + `slurp`                          | `scrot`                  |
 

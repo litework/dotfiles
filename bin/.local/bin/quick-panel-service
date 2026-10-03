@@ -49,6 +49,8 @@ window.qp-window, window.qp-backdrop { background: none; box-shadow: none; }
 .qp-sub { opacity: 0.65; font-size: 0.85em; }
 .qp-error { color: @error_color; font-size: 0.85em; }
 .qp-footer { margin-top: 8px; }
+.qp-prompt { background: alpha(@accent_bg_color, 0.18); border-radius: 8px; padding: 10px; margin: 4px 0; }
+.qp-prompt-text { font-weight: bold; }
 """
 
 
@@ -164,6 +166,8 @@ def button(label, callback, suggested=False):
 
 class Page(Gtk.Box):
     title = ""
+    settings_label = ""
+    settings_cmd = None
 
     def __init__(self, panel):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -190,13 +194,15 @@ class Page(Gtk.Box):
 
         footer = Gtk.Box(spacing=6)
         footer.add_css_class("qp-footer")
-        self.settings_button = Gtk.Button(label=self.settings_label, hexpand=True, halign=Gtk.Align.START)
-        self.settings_button.add_css_class("flat")
-        self.settings_button.connect("clicked", lambda *_: (self.panel.hide_panel(), spawn(self.settings_cmd)))
+        footer.append(Gtk.Box(hexpand=True))
+        if self.settings_cmd:
+            settings = Gtk.Button(label=self.settings_label, halign=Gtk.Align.START)
+            settings.add_css_class("flat")
+            settings.connect("clicked", lambda *_: (self.panel.hide_panel(), spawn(self.settings_cmd)))
+            footer.prepend(settings)
         self.refresh_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Refresh")
         self.refresh_button.add_css_class("flat")
         self.refresh_button.connect("clicked", lambda *_: self.rescan())
-        footer.append(self.settings_button)
         footer.append(self.refresh_button)
         self.append(footer)
 
@@ -406,8 +412,6 @@ BT_ICONS = {
 
 class BluetoothPage(Page):
     title = "Bluetooth"
-    settings_label = "More Bluetooth settings"
-    settings_cmd = ["blueman-manager"]
 
     def __init__(self, panel):
         super().__init__(panel)
@@ -415,6 +419,48 @@ class BluetoothPage(Page):
         self.error = {}
         self.scan_proc = None
         self.timer = None
+        self.bus = Gio.bus_get_sync(Gio.BusType.SYSTEM)
+
+        # Pairing prompts from the agent show up here, under the status line.
+        self.prompt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
+        self.prompt.add_css_class("qp-prompt")
+        self.insert_child_after(self.prompt, self.status)
+
+    def show_prompt(self, text, on_ok=None, on_cancel=None, entry=None, ok_label="Confirm"):
+        """Show a prompt; on_ok receives the entry text (or None)."""
+        self.clear_prompt()
+        label = Gtk.Label(label=text, xalign=0, wrap=True)
+        label.add_css_class("qp-prompt-text")
+        self.prompt.append(label)
+        field = None
+        if entry:
+            field = Gtk.Entry(placeholder_text=entry, input_purpose=Gtk.InputPurpose.DIGITS)
+            field.connect("activate", lambda e: (self.clear_prompt(), on_ok(e.get_text())))
+            self.prompt.append(field)
+        if on_ok:
+            buttons = [button(ok_label, lambda: (self.clear_prompt(), on_ok(field.get_text() if field else None)), True)]
+            if on_cancel:
+                buttons.insert(0, button("Cancel", lambda: (self.clear_prompt(), on_cancel())))
+            self.prompt.append(button_row(*buttons))
+        self.prompt.set_visible(True)
+        if field:
+            GLib.idle_add(field.grab_focus)
+
+    def clear_prompt(self):
+        while (child := self.prompt.get_first_child()) is not None:
+            self.prompt.remove(child)
+        self.prompt.set_visible(False)
+
+    def device_path(self, mac):
+        try:
+            objects = self.bus.call_sync("org.bluez", "/", "org.freedesktop.DBus.ObjectManager",
+                                         "GetManagedObjects", None, None, Gio.DBusCallFlags.NONE, 3000, None)
+        except GLib.Error:
+            return None
+        for path, ifaces in objects.unpack()[0].items():
+            if ifaces.get("org.bluez.Device1", {}).get("Address") == mac:
+                return path
+        return None
 
     def opened(self):
         self.list.expanded_key = None
@@ -563,9 +609,29 @@ class BluetoothPage(Page):
 
     def pair(self, mac):
         self.stop_scan()
-        self.act(mac, ["pair"], "Pairing…",
-                 then=lambda: run(["bluetoothctl", "trust", mac],
-                                  lambda *_: self.act(mac, ["connect"], "Connecting…")))
+        path = self.device_path(mac)
+        if not path:
+            self.error[mac] = "This device isn't available any more. Try refreshing."
+            self.refresh()
+            return
+        self.busy[mac] = "Pairing…"
+        self.error.pop(mac, None)
+        self.refresh()
+
+        def paired(conn, res):
+            try:
+                conn.call_finish(res)
+            except GLib.Error:
+                self.busy.pop(mac, None)
+                self.clear_prompt()
+                self.error[mac] = "Pairing failed. Make sure the device is in pairing mode and try again."
+                self.refresh()
+                return
+            self.clear_prompt()
+            run(["bluetoothctl", "trust", mac], lambda *_: self.act(mac, ["connect"], "Connecting…"))
+
+        self.bus.call("org.bluez", path, "org.bluez.Device1", "Pair", None, None,
+                      Gio.DBusCallFlags.NONE, 60000, None, paired)
 
     def remove(self, mac):
         self.list.expanded_key = None
@@ -574,6 +640,100 @@ class BluetoothPage(Page):
     def _on_switch(self, *_):
         state = "on" if self.switch.get_active() else "off"
         run(["bluetoothctl", "power", state], lambda *_: self.refresh())
+
+
+AGENT_PATH = "/dev/litework/QuickPanel/agent"
+AGENT_XML = """<node><interface name="org.bluez.Agent1">
+  <method name="Release"/>
+  <method name="RequestPinCode"><arg type="o" direction="in"/><arg type="s" direction="out"/></method>
+  <method name="DisplayPinCode"><arg type="o" direction="in"/><arg type="s" direction="in"/></method>
+  <method name="RequestPasskey"><arg type="o" direction="in"/><arg type="u" direction="out"/></method>
+  <method name="DisplayPasskey"><arg type="o" direction="in"/><arg type="u" direction="in"/><arg type="q" direction="in"/></method>
+  <method name="RequestConfirmation"><arg type="o" direction="in"/><arg type="u" direction="in"/></method>
+  <method name="RequestAuthorization"><arg type="o" direction="in"/></method>
+  <method name="AuthorizeService"><arg type="o" direction="in"/><arg type="s" direction="in"/></method>
+  <method name="Cancel"/>
+</interface></node>"""
+
+
+class BluezAgent:
+    """BlueZ pairing agent (replaces blueman-applet); prompts appear on the Bluetooth page."""
+
+    def __init__(self, panel):
+        self.panel = panel
+        self.bus = Gio.bus_get_sync(Gio.BusType.SYSTEM)
+        iface = Gio.DBusNodeInfo.new_for_xml(AGENT_XML).interfaces[0]
+        self.bus.register_object_with_closures2(AGENT_PATH, iface, self._on_call, None, None)
+        # (Re-)register whenever bluetoothd appears, e.g. after a restart.
+        Gio.bus_watch_name_on_connection(self.bus, "org.bluez", Gio.BusNameWatcherFlags.NONE,
+                                         lambda *_: self._register(), None)
+
+    def _register(self):
+        def default(conn, res):
+            try:
+                conn.call_finish(res)
+            except GLib.Error as e:
+                if "AlreadyExists" not in e.message:
+                    print(f"quick-panel: could not register Bluetooth agent: {e.message}", file=sys.stderr)
+            conn.call("org.bluez", "/org/bluez", "org.bluez.AgentManager1", "RequestDefaultAgent",
+                      GLib.Variant("(o)", (AGENT_PATH,)), None, Gio.DBusCallFlags.NONE, -1, None, None)
+
+        self.bus.call("org.bluez", "/org/bluez", "org.bluez.AgentManager1", "RegisterAgent",
+                      GLib.Variant("(os)", (AGENT_PATH, "KeyboardDisplay")), None,
+                      Gio.DBusCallFlags.NONE, -1, None, default)
+
+    def _prop(self, path, name):
+        try:
+            v = self.bus.call_sync("org.bluez", path, "org.freedesktop.DBus.Properties", "Get",
+                                   GLib.Variant("(ss)", ("org.bluez.Device1", name)), None,
+                                   Gio.DBusCallFlags.NONE, 2000, None)
+            return v.unpack()[0]
+        except GLib.Error:
+            return None
+
+    def _on_call(self, _conn, _sender, _path, _iface, method, params, inv):
+        page = self.panel.pages["bluetooth"]
+        args = params.unpack()
+        reject = lambda: inv.return_dbus_error("org.bluez.Error.Rejected", "Rejected")
+        ok = lambda _text=None: inv.return_value(None)
+
+        if method == "Release":
+            return inv.return_value(None)
+        if method == "Cancel":
+            page.clear_prompt()
+            return inv.return_value(None)
+
+        name = self._prop(args[0], "Alias") or "the device"
+        if method == "AuthorizeService" and self._prop(args[0], "Trusted"):
+            return inv.return_value(None)
+
+        self.panel.show("bluetooth")
+        if method == "RequestConfirmation":
+            page.show_prompt(f"Does {name} show the code {args[1]:06d}?", ok, reject, ok_label="Yes, pair")
+        elif method == "RequestAuthorization":
+            page.show_prompt(f"Pair with {name}?", ok, reject, ok_label="Pair")
+        elif method == "AuthorizeService":
+            page.show_prompt(f"Allow {name} to connect?", ok, reject, ok_label="Allow")
+        elif method == "DisplayPinCode":
+            page.show_prompt(f"Type {args[1]} on {name}, then press Enter.")
+            inv.return_value(None)
+        elif method == "DisplayPasskey":
+            page.show_prompt(f"Type {args[1]:06d} on {name}, then press Enter.")
+            inv.return_value(None)
+        elif method == "RequestPinCode":
+            page.show_prompt(f"Enter the PIN for {name}.",
+                             lambda text: inv.return_value(GLib.Variant("(s)", (text or "",))),
+                             reject, entry="PIN", ok_label="Pair")
+        elif method == "RequestPasskey":
+            def passkey(text):
+                try:
+                    inv.return_value(GLib.Variant("(u)", (int(text or ""),)))
+                except ValueError:
+                    reject()
+            page.show_prompt(f"Enter the passkey shown on {name}.", passkey, reject, entry="Passkey",
+                             ok_label="Pair")
+        else:
+            reject()
 
 
 class QuickPanel(Adw.Application):
@@ -632,6 +792,8 @@ class QuickPanel(Adw.Application):
             self.stack.add_named(page, name)
         self.window.set_child(self.stack)
 
+        self.agent = BluezAgent(self)
+
         toggle = Gio.SimpleAction.new("toggle", GLib.VariantType.new("s"))
         toggle.connect("activate", lambda _a, mode: self.toggle(mode.get_string()))
         self.add_action(toggle)
@@ -661,6 +823,10 @@ class QuickPanel(Adw.Application):
         self.pages[mode].opened()
         self.backdrop.present()
         self.window.present()
+
+    def show(self, mode):
+        if not (self.window.get_visible() and self.current == mode):
+            self.toggle(mode)
 
     def hide_panel(self):
         if self.current:

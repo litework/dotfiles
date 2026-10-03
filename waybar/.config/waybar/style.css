@@ -25,10 +25,14 @@ window#waybar {
 #mode { color: @color0; background: @color7; padding: 0 6px; }
 
 #custom-power, #mpd, #clock, #cpu, #memory, #bluetooth, #wireplumber,
-#backlight, #network, #battery, #tray {
+#custom-brightness, #network, #battery, #tray {
   padding: 0 6px;
 }
 #custom-power { color: @color7; }
+#network, #bluetooth { padding: 0 8px; }
+#bluetooth { font-size: 16px; color: @foreground; }
+#network:hover, #bluetooth:hover { background: alpha(@foreground, 0.12); }
+#bluetooth.off, #bluetooth.disabled { color: @color8; }
 #wireplumber.muted, #network.disconnected { color: @color8; }
 #battery.warning  { color: @color3; }
 #battery.critical { color: @color1; }

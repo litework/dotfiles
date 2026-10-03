@@ -5,7 +5,7 @@
   "spacing": 4,
   "modules-left": ["custom/power", "sway/workspaces", "sway/mode", "mpd"],
   "modules-center": ["clock"],
-  "modules-right": ["cpu", "memory", "bluetooth", "wireplumber", "backlight", "network", "battery", "tray"],
+  "modules-right": ["cpu", "memory", "wireplumber", "custom/brightness", "battery", "tray", "network", "bluetooth"],
 
   "custom/power": {
     "format": "⏻",
@@ -25,8 +25,8 @@
     "format": "{:%a %d %b  %H:%M}",
     "tooltip-format": "<tt>{calendar}</tt>"
   },
-  "cpu": { "format": " {usage}%", "interval": 5 },
-  "memory": { "format": " {percentage}%", "interval": 10 },
+  "cpu": { "format": "CPU {usage}%", "interval": 5 },
+  "memory": { "format": "RAM {percentage}%", "interval": 10, "tooltip-format": "{used:0.1f} / {total:0.1f} GiB used" },
   "bluetooth": {
     "format": "󰂯",
     "format-connected": "󰂱 {device_alias}",
@@ -34,17 +34,24 @@
     "format-off": "󰂲",
     "tooltip-format-connected": "{device_enumerate}",
     "tooltip-format-enumerate-connected": "{device_alias}",
-    "on-click": "~/.local/bin/quick-panel bluetooth",
-    "on-click-right": "blueman-manager"
+    "on-click": "~/.local/bin/quick-panel bluetooth"
   },
   "wireplumber": {
-    "format": "{icon} {volume}%",
-    "format-muted": " muted",
-    "format-icons": ["", "", ""],
+    "format": "VOL {volume}%",
+    "format-muted": "VOL muted",
+    "tooltip-format": "{node_name}",
     "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
     "on-click-right": "pavucontrol"
   },
-  "backlight": { "format": " {percent}%" },
+  "custom/brightness": {
+    "exec": "brightnessctl -m -c backlight | cut -d, -f4",
+    "format": "BRI {}",
+    "interval": 30,
+    "signal": 8,
+    "tooltip": false,
+    "on-scroll-up": "brightnessctl -q set 5%+ && pkill -RTMIN+8 -x waybar",
+    "on-scroll-down": "brightnessctl -q set 5%- && pkill -RTMIN+8 -x waybar"
+  },
   "network": {
     "format-wifi": "{icon} {essid}",
     "format-ethernet": "󰈀 {ipaddr}",
@@ -56,10 +63,12 @@
     "on-click-right": "nm-connection-editor"
   },
   "battery": {
+    "bat": "BAT0",
     "states": { "warning": 25, "critical": 10 },
-    "format": "{icon} {capacity}%",
-    "format-charging": " {capacity}%",
-    "format-icons": ["", "", "", "", ""]
+    "format": "BAT {capacity}%",
+    "format-charging": "BAT {capacity}% 󱐋",
+    "format-plugged": "BAT {capacity}% 󰚥",
+    "tooltip-format": "{timeTo}"
   },
   "tray": { "spacing": 6 }
 }
