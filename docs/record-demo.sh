@@ -1,8 +1,8 @@
 #!/bin/sh
-# docs/record-demo.sh — record docs/demo.gif: a scripted tour of the desktop.
-# Drives the flyouts over D-Bus (no synthetic input), on an empty workspace, with the
-# panel in demo mode (QP_DEMO=1) so the Wi-Fi name and city stay out of the recording.
-# Needs: wf-recorder, ffmpeg. Don't touch the mouse/keyboard while it runs (~35 s).
+# docs/record-demo.sh — record docs/demo.gif: a quick scripted tour of the desktop.
+# Drives sway and the flyouts over IPC/D-Bus (no synthetic input), on an empty workspace,
+# with the panel in demo mode (QP_DEMO=1) so the Wi-Fi name and city stay out of it.
+# Needs: wf-recorder, ffmpeg, cmatrix. Don't touch the mouse/keyboard while it runs (~30 s).
 set -eu
 cd "$(dirname "$0")"
 tmp=$(mktemp -d)
@@ -15,37 +15,49 @@ restart_panel() {
     env "$@" setsid -f ~/.local/bin/quick-panel-service --daemon >/dev/null 2>&1
     sleep 3
 }
+fetch="fastfetch --structure Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:Display:WM:Theme:Icons:Cursor:Terminal:CPU:GPU:Memory:Disk:Battery:Break:Colors"
 
 previous=$(swaymsg -t get_workspaces | python -c 'import json,sys; print(next(w["name"] for w in json.load(sys.stdin) if w["focused"]))')
 restart_panel QP_DEMO=1
+~/.local/bin/weather update >/dev/null   # fresh forecast so the flyout fills instantly
 swaymsg -q workspace number 9
-swaymsg -q exec 'foot --app-id=demo --hold fastfetch --structure Title:Separator:OS:Host:Kernel:Uptime:Packages:Shell:Display:WM:Theme:Icons:Cursor:Terminal:CPU:GPU:Memory:Disk:Battery:Break:Colors'
-sleep 2.5
+sleep 0.5
 
-wf-recorder -r 15 -f "$tmp/demo.mp4" >/dev/null 2>&1 &
+wf-recorder -r 20 -f "$tmp/demo.mp4" >/dev/null 2>&1 &
 rec=$!
-sleep 2
+sleep 1
 
-$qp start;                 sleep 2.5
-$qp search ed;             sleep 2.5
-$qp search '12*7+1';       sleep 2.5
-$qp start;                 sleep 0.8
-$qp control;               sleep 3
-nav appearance;            sleep 2.5
-$qp control;               sleep 0.8
-$qp osd volume;            sleep 2
-$qp calendar;              sleep 3.5
-$qp calendar;              sleep 0.8
-$qp weather;               sleep 3.5
+# Windows tile in: fastfetch | neovim over cmatrix
+swaymsg -q exec "foot --app-id=demo-fetch --hold $fetch";                          sleep 1.2
+swaymsg -q exec "foot --app-id=demo-nvim nvim -R $HOME/dotfiles/sway/.config/sway/fx.conf"; sleep 1.3
+swaymsg -q '[app_id="demo-nvim"] focus' && swaymsg -q splitv
+swaymsg -q exec "foot --app-id=demo-matrix cmatrix -b -u 8";                       sleep 1.6
+
+# Flyouts
+$qp start;                 sleep 1.3
+$qp search ed;             sleep 1.1
+$qp search '12*7+1';       sleep 1.1
+$qp start;                 sleep 0.4
+$qp control;               sleep 1.6
+nav appearance;            sleep 1.2
+$qp control;               sleep 0.4
+$qp osd volume;            sleep 1.8
+$qp calendar;              sleep 1.5
+$qp calendar;              sleep 0.3
 $qp weather;               sleep 1.5
+$qp weather;               sleep 0.4
+
+# Windows close
+swaymsg -q '[app_id="demo-matrix"] kill';   sleep 0.5
+swaymsg -q '[app_id="demo-nvim"] kill';     sleep 0.5
+swaymsg -q '[app_id="demo-fetch"] kill';    sleep 0.8
 
 kill -INT $rec; wait $rec || true
-swaymsg -q '[app_id="demo"] kill'
 swaymsg -q workspace "$previous"
 restart_panel
 
 ffmpeg -loglevel error -y -i "$tmp/demo.mp4" -vf \
-  "fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
+  "fps=12,scale=880:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle" \
   demo.gif
 rm -rf "$tmp"
 ls -la demo.gif
