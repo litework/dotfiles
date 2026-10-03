@@ -47,7 +47,7 @@ Each top-level directory is a [GNU Stow](https://www.gnu.org/software/stow/) pac
 | `Super+w` / `Super+m` / `Super+s` / `Super+f` | close / tabbed / float / fullscreen |
 | `Super+-` / `Super+=` | shrink / grow gaps |
 | `Super+F1` | scratchpad terminal |
-| `Super+F2…F10` | yazi, thunar, chrome, ncmpcpp, spotify, weechat, gimp, pavucontrol, qbittorrent |
+| `Super+F2…F10` | yazi, thunar, edge, ncmpcpp, spotify, weechat, gimp, pavucontrol, qbittorrent |
 | `Print` / `Shift+Print` | screenshot area / full screen |
 | `Super+x` / `Super+Shift+Esc` | power menu / lock |
 | `Super+Esc` / `Super+Alt+Esc` | reload / exit sway |
